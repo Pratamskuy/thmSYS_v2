@@ -17,8 +17,8 @@ function Users() {
 
   const roles = [
     { id: 1, name: 'Admin' },
-    { id: 2, name: 'Petugas' },
-    { id: 3, name: 'Peminjam' },
+    { id: 2, name: 'officer' },
+    { id: 3, name: 'visitor' },
   ];
 
   useEffect(() => {

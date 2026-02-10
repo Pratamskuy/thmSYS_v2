@@ -12,12 +12,7 @@ function Borrows() {
   const [reportBorrows, setReportBorrows] = useState([]);
   const [isPrintReady, setIsPrintReady] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
-  const [formData, setFormData] = useState({
-    id_items: '',
-    item_count: 1,
-    return_date_expected: '',
-    notes: '',
-  });
+  const [selectedItems, setSelectedItems] = useState([]);
 
   useEffect(() => {
     loadBorrows();
@@ -69,11 +64,29 @@ function Borrows() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    if (selectedItems.length === 0) {
+      alert('pick at least one item');
+      return;
+    }
+
+    const hasEmptyReturnDate = selectedItems.some((item) => !item.return_date_expected);
+    if (hasEmptyReturnDate) {
+      alert('fill expected return date for all items');
+      return;
+    }
+
+    const hasInvalidQty = selectedItems.some((item) => Number(item.item_count) < 1 || Number(item.item_count) > Number(item.available));
+    if (hasInvalidQty) {
+      alert('item quantity is invalid');
+      return;
+    }
     try {
       await borrowAPI.create(formData);
       loadBorrows();
+      loadAvailableItems();
       closeModal();
-      alert('Borrow request submitted successfully!');
+      alert(`${selectedItems.length} borrow request sent sucessfully!`);
     } catch (error) {
       alert(error.message);
     }
@@ -139,17 +152,43 @@ function Borrows() {
   };
 
   const openCreateModal = () => {
-    setFormData({
-      id_items: '',
-      item_count: 1,
-      return_date_expected: '',
-      notes: '',
-    });
+    setSelectedItems([]);
     setShowModal(true);
   };
 
   const closeModal = () => {
     setShowModal(false);
+    setSelectedItems([]);
+  };
+
+  const isItemSelected = (id) => selectedItems.some((selectedItem) => selectedItem.id === id);
+
+  const toggleItemSelection = (item) => {
+    setSelectedItems((prev) => {
+      if (prev.some((selectedItem) => selectedItem.id === item.id)) {
+        return prev.filter((selectedItem) => selectedItem.id !== item.id);
+      }
+
+      return [
+        ...prev,
+        {
+          id: item.id,
+          item_name: item.item_name,
+          available: item.available,
+          item_count: 1,
+          return_date_expected: '',
+          notes: '',
+        },
+      ];
+    });
+  };
+
+  const updateSelectedItem = (id, field, value) => {
+    setSelectedItems((prev) =>
+      prev.map((selectedItem) =>
+        selectedItem.id === id ? { ...selectedItem, [field]: value } : selectedItem
+      )
+    );
   };
 
   if (loading) {
@@ -354,57 +393,90 @@ function Borrows() {
               <button className="modal-close" onClick={closeModal}>×</button>
             </div>
             
-            <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label className="form-label">Select Item *</label>
-                <select
-                  className="form-select"
-                  value={formData.id_items}
-                  onChange={(e) => setFormData({...formData, id_items: e.target.value})}
-                  required
-                >
-                  <option value="">Choose an item...</option>
-                  {items.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.item_name} (Available: {item.available})
-                    </option>
+            <section className="borrow-selector-panel">
+              <div className="borrow-selector-header">
+                <h3>Pilih Item Dulu</h3>
+                <p>Klik item untuk menambah/menghapus dari daftar pengajuan.</p>
+              </div>
+
+              <div className="item-selector-grid">
+                {items.length === 0 ? (
+                  <p className="text-center">Tidak ada item yang tersedia saat ini.</p>
+                ) : (
+                  items.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`item-selector-card ${isItemSelected(item.id) ? 'selected' : ''}`}
+                      onClick={() => toggleItemSelection(item)}
+                    >
+                      <span className="item-selector-name">{item.item_name}</span>
+                      <span className="item-selector-stock">Stok tersedia: {item.available}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </section>  
+              <form onSubmit={handleSubmit}>
+              {selectedItems.length === 0 ? (
+                <div className="empty-selection-hint">Pilih minimal 1 item untuk menampilkan form peminjaman.</div>
+              ) : (
+                <div className="selected-items-form-list">
+                  {selectedItems.map((selectedItem) => (
+                    <div className="selected-item-form-card" key={selectedItem.id}>
+                      <div className="selected-item-form-header">
+                        <h3>{selectedItem.item_name}</h3>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-danger"
+                          onClick={() => toggleItemSelection(selectedItem)}
+                        >
+                          Hapus
+                        </button>
+                      </div>
+
+                      <div className="form-group">
+                        <label className="form-label">Quantity *</label>
+                        <input
+                          type="number"
+                          className="form-input"
+                          value={selectedItem.item_count}
+                          onChange={(e) =>
+                            updateSelectedItem(selectedItem.id, 'item_count', e.target.value)
+                          }
+                          required
+                          min="1"
+                          max={selectedItem.available}
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label className="form-label">Expected Return Date *</label>
+                        <input
+                          type="date"
+                          className="form-input"
+                          value={selectedItem.return_date_expected}
+                          onChange={(e) =>
+                            updateSelectedItem(selectedItem.id, 'return_date_expected', e.target.value)
+                          }
+                          required
+                          min={new Date().toISOString().split('T')[0]}
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label className="form-label">Notes</label>
+                        <textarea
+                          className="form-textarea"
+                          value={selectedItem.notes}
+                          onChange={(e) => updateSelectedItem(selectedItem.id, 'notes', e.target.value)}
+                          placeholder="Purpose of borrowing..."
+                        />
+                      </div>
+                    </div>
                   ))}
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Quantity *</label>
-                <input
-                  type="number"
-                  className="form-input"
-                  value={formData.item_count}
-                  onChange={(e) => setFormData({...formData, item_count: e.target.value})}
-                  required
-                  min="1"
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Expected Return Date *</label>
-                <input
-                  type="date"
-                  className="form-input"
-                  value={formData.return_date_expected}
-                  onChange={(e) => setFormData({...formData, return_date_expected: e.target.value})}
-                  required
-                  min={new Date().toISOString().split('T')[0]}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Notes</label>
-                <textarea
-                  className="form-textarea"
-                  value={formData.notes}
-                  onChange={(e) => setFormData({...formData, notes: e.target.value})}
-                  placeholder="Purpose of borrowing..."
-                />
-              </div>
+                </div>
+              )}
 
               <div className="btn-group">
                 <button type="submit" className="btn btn-primary">
@@ -413,7 +485,7 @@ function Borrows() {
                 <button type="button" className="btn btn-secondary" onClick={closeModal}>
                   Cancel
                 </button>
-              </div>
+              </div>  
             </form>
           </div>
         </div>
