@@ -13,7 +13,7 @@ function Navbar() {
   if (!user) return null;
 
   return (
-    <nav className="navbar">
+    <nav className="navbar no-print">
       <div className="navbar-content">
         <Link to="/dashboard" className="navbar-brand">
           THMs

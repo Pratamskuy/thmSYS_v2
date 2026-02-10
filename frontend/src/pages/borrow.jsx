@@ -82,7 +82,16 @@ function Borrows() {
       return;
     }
     try {
-      await borrowAPI.create(formData);
+      await Promise.all(
+        selectedItems.map((selectedItem) =>
+          borrowAPI.create({
+            id_items: selectedItem.id,
+            item_count: Number(selectedItem.item_count) || 1,
+            return_date_expected: selectedItem.return_date_expected,
+            notes: selectedItem.notes,
+          })
+        )
+      );
       loadBorrows();
       loadAvailableItems();
       closeModal();
@@ -479,7 +488,7 @@ function Borrows() {
               )}
 
               <div className="btn-group">
-                <button type="submit" className="btn btn-primary">
+                <button type="submit" className="btn btn-primary"  disabled={selectedItems.length === 0}>
                   Submit Request
                 </button>
                 <button type="button" className="btn btn-secondary" onClick={closeModal}>

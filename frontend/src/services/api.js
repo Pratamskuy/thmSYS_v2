@@ -60,6 +60,21 @@ const apiCall = async (endpoint, options = {}) => {
   }
 };
 
+const createMultipartFormData = (payload) => {
+  if (typeof globalThis.FormData === 'undefined') {
+    throw new Error('FormData is not available in this environment');
+  }
+
+  const formData = new globalThis.FormData();
+  Object.keys(payload).forEach((key) => {
+    if (payload[key] !== null && payload[key] !== undefined) {
+      formData.append(key, payload[key]);
+    }
+  });
+
+  return formData;
+};
+
 // Auth APIs
 export const authAPI = {
   login: (email, password) => 
@@ -120,10 +135,7 @@ export const itemAPI = {
   getById: (id) => apiCall(`/alat/${id}`),
   getAvailable: () => apiCall('/alat/tersedia'),
   create: async (itemData) => {
-    const formData = new FormData();
-    Object.keys(itemData).forEach(key => {
-      formData.append(key, itemData[key]);
-    });
+    const formData = createMultipartFormData(itemData);
     
     const token = getAuthToken();
     const response = await fetch(`${API_BASE_URL}/alat`, {
@@ -141,12 +153,7 @@ export const itemAPI = {
     return data;
   },
   update: async (id, itemData) => {
-    const formData = new FormData();
-    Object.keys(itemData).forEach(key => {
-      if (itemData[key] !== null && itemData[key] !== undefined) {
-        formData.append(key, itemData[key]);
-      }
-    });
+    const formData = createMultipartFormData(itemData);
     
     const token = getAuthToken();
     const response = await fetch(`${API_BASE_URL}/alat/${id}`, {
