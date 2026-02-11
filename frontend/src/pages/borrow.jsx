@@ -213,6 +213,38 @@ function Borrows() {
       return new Date(dateValue).toLocaleDateString('id-ID');
     };
   
+    const getOverdueDays = (expectedDate, actualReturnDate) => {
+      if (!expectedDate || !actualReturnDate) {
+        return 0;
+      }
+  
+      const expected = new Date(expectedDate);
+      const returned = new Date(actualReturnDate);
+  
+      if (Number.isNaN(expected.getTime()) || Number.isNaN(returned.getTime())) {
+        return 0;
+      }
+  
+      const diffDays = Math.floor((returned - expected) / (1000 * 60 * 60 * 24));
+      return diffDays > 0 ? diffDays : 0;
+    };
+  
+    const formatFine = (borrow) => {
+      const baseFine = Number(borrow.fine ?? borrow.denda) || 0;
+      let late = Number(borrow.late ?? borrow.terlambat_hari) || 0;
+  
+      if (late <= 0) {
+        late = getOverdueDays(borrow.return_date_expected, borrow.return_date);
+      }
+  
+      const fine = baseFine > 0 ? baseFine : (late > 0 ? late * 5000 : 0);
+  
+      if (fine <= 0 && late <= 0) {
+        return '-';
+      }
+  
+      return `Rp ${fine.toLocaleString('id-ID')} (${late} hari)`;
+    };
   return (
     <div>
       <div className="card no-print">
@@ -275,6 +307,7 @@ function Borrows() {
                   <th>Quantity</th>
                   <th>Borrow Date</th>
                   <th>Expected Return</th>
+                  <th>Fine</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
@@ -288,6 +321,7 @@ function Borrows() {
                     <td>{borrow.item_count}</td>
                     <td>{new Date(borrow.borrow_date).toLocaleDateString()}</td>
                     <td>{new Date(borrow.return_date_expected).toLocaleDateString()}</td>
+                    <td>{formatFine(borrow)}</td>
                     <td>
                       <span className={`badge badge-${borrow.status}`}>
                         {borrow.status}
@@ -366,6 +400,7 @@ function Borrows() {
                 <th>Qty</th>
                 <th>Tgl Pinjam</th>
                 <th>Tgl Kembali</th>
+                <th>Denda</th>
                 <th>Status</th>
                 <th>Petugas</th>
               </tr>
@@ -373,7 +408,7 @@ function Borrows() {
             <tbody>
               {reportBorrows.length === 0 ? (
                 <tr>
-                  <td colSpan="8">Tidak ada data peminjaman.</td>
+                  <td colSpan="9">Tidak ada data peminjaman.</td>
                 </tr>
               ) : (
                 reportBorrows.map((borrow) => (
@@ -384,6 +419,7 @@ function Borrows() {
                     <td>{borrow.item_count || 0}</td>
                     <td>{formatDate(borrow.borrow_date)}</td>
                     <td>{formatDate(borrow.return_date_expected)}</td>
+                    <td>{formatFine(borrow)}</td>
                     <td>{borrow.status || '-'}</td>
                     <td>{borrow.officer_name || '-'}</td>
                   </tr>

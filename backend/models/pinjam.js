@@ -8,11 +8,15 @@ const getAll = (callback) => {
             user_data.full_name as full_name,
             user_data.email as email,
             items.item_name,
-            officer.full_name as officer_name
+            officer.full_name as officer_name,
+            return_data.return_date,
+            return_data.late,
+            return_data.fine AS denda
         FROM borrow_data
         LEFT JOIN user_data ON borrow_data.id_user = user_data.id
         LEFT JOIN items ON borrow_data.id_items = items.id
         LEFT JOIN user_data as officer ON borrow_data.id_officer_approval = officer.id
+        LEFT JOIN return_data ON return_data.borrow_id = borrow_data.id
         ORDER BY borrow_data.id DESC
     `;
     db.query(query, callback);
@@ -26,11 +30,15 @@ const getById = (id, callback) => {
             user_data.full_name as full_name,
             user_data.email as email,
             items.item_name,
-            officer.full_name as officer_name
+             officer.full_name as officer_name,
+            return_data.return_date,
+            return_data.late,
+            return_data.fine AS denda
         FROM borrow_data
         LEFT JOIN user_data ON borrow_data.id_user = user_data.id
         LEFT JOIN items ON borrow_data.id_items = items.id
         LEFT JOIN user_data as officer ON borrow_data.id_officer_approval = officer.id
+         LEFT JOIN return_data ON return_data.borrow_id = borrow_data.id
         WHERE borrow_data.id = ?
     `;
     db.query(query, [id], callback);
@@ -50,10 +58,14 @@ const getByUser = (id_user, callback) => {
             b.return_date_expected,
             b.status,
             b.notes,
-            b.approval_date
+            b.approval_date,
+            r.return_date,
+            r.late,
+            r.fine AS denda
         FROM borrow_data b
         LEFT JOIN items i ON b.id_items = i.id
         LEFT JOIN user_data u ON b.id_user = u.id
+        LEFT JOIN return_data r ON r.borrow_id = b.id
         WHERE b.id_user = ?
         ORDER BY b.created_at DESC
     `;
@@ -72,10 +84,14 @@ const getPending = (callback) => {
             borrow_data.*,
             user_data.full_name as full_name,
             user_data.email as email,
-            items.item_name
+            items.item_name,
+            return_data.return_date,
+            return_data.late,
+            return_data.fine AS denda
         FROM borrow_data
         LEFT JOIN user_data ON borrow_data.id_user = user_data.id
         LEFT JOIN items ON borrow_data.id_items = items.id
+        LEFT JOIN return_data ON return_data.borrow_id = borrow_data.id
         WHERE borrow_data.status = 'pending'
         ORDER BY borrow_data.borrow_date ASC
     `;
@@ -89,7 +105,11 @@ const getActive = (callback) => {
             borrow_data.*,
             user_data.full_name as full_name,
             user_data.email as email,
-            items.item_name
+             items.item_name,
+            return_data.return_date,
+            return_data.late,
+            return_data.fine,
+            return_data.fine AS denda
         FROM borrow_data
         LEFT JOIN user_data ON borrow_data.id_user = user_data.id
         LEFT JOIN items ON borrow_data.id_items = items.id
