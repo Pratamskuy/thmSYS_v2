@@ -436,6 +436,43 @@ const requestReturn = (req, res) => {
     });
   };
   
+// ===== CANCEL PEMINJAMAN =====
+// Endpoint: PUT /api/peminjaman/:id/cancel
+const cancel = (req, res) => {
+    const { id } = req.params;
+    const user_id = req.user.id;
+
+    borrow.cancel(id, user_id, (err, results) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                message: "Gagal membatalkan peminjaman",
+                error: err.message
+            });
+        }
+        if (results.affectedRows === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Peminjaman tidak ditemukan atau tidak dapat dibatalkan"
+            });
+        }
+
+        // Catat log aktivitas
+        activityLog.create({
+            id_user: user_id,
+            aksi: 'CANCEL',
+            tabel_terkait: 'peminjaman',
+            id_data: id,
+            keterangan: `Peminjaman dibatalkan: ID ${id}`
+        }, () => { });
+
+        res.status(200).json({
+            success: true,
+            message: "Peminjaman berhasil dibatalkan"
+        });
+    });
+};
+
 module.exports = {
     getAll,
     getById,
@@ -445,6 +482,7 @@ module.exports = {
     create,
     approve,
     reject,
+    cancel,
     deleteborrow,
     requestReturn,
     getReturnRequests

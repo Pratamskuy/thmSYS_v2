@@ -96,7 +96,7 @@ const createAllTables = (connection) =>{
         item_count INT NOT NULL DEFAULT 1,
         borrow_date DATETIME DEFAULT CURRENT_TIMESTAMP,
         return_date_expected DATETIME NOT NULL,
-        status ENUM ('available', 'approved','rejected', 'waiting for return', 'pending', 'taken') DEFAULT 'pending',
+        status ENUM ('available', 'approved','rejected', 'waiting for return', 'pending', 'taken', 'cancelled') DEFAULT 'pending',
         id_officer_approval INT,
         approval_date DATETIME,
         notes TEXT,

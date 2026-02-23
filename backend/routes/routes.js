@@ -43,6 +43,7 @@ router.get('/peminjaman/:id', verifyToken, borrowController.getById);
 router.post('/peminjaman', verifyToken, borrowController.create);
 router.put('/peminjaman/:id/approve', verifyToken, isAdminOrPetugas, borrowController.approve);
 router.put('/peminjaman/:id/reject', verifyToken, isAdminOrPetugas, borrowController.reject);
+router.put('/peminjaman/:id/cancel', verifyToken, borrowController.cancel);
 router.delete('/peminjaman/:id', verifyToken, isAdmin, borrowController.deleteborrow);
 router.put('/peminjaman/:id/return', verifyToken, borrowController.requestReturn);
 

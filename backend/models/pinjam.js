@@ -154,20 +154,79 @@ const create = (data, callback) => {
 };
 //mesin approve
 const approve = (id, officer_id, callback) => {
-    const query = `
-        UPDATE borrow_data b
-        JOIN items i ON b.id_items = i.id
-        SET 
-            b.status = 'taken',
-            b.id_officer_approval = ?,
-            b.approval_date = NOW(),
-            i.available = i.available - b.item_count
-        WHERE 
-            b.id = ? 
-            AND b.status = 'pending'
-            AND i.available >= b.item_count
-    `;
-    db.query(query, [officer_id, id], callback);
+    db.getConnection((err, connection) => {
+        if (err) return callback(err, null);
+
+        connection.beginTransaction((err) => {
+            if (err) {
+                connection.release();
+                return callback(err, null);
+            }
+
+            // First, lock and check the item availability
+            const checkQuery = `
+                SELECT i.available, b.item_count
+                FROM borrow_data b
+                JOIN items i ON b.id_items = i.id
+                WHERE b.id = ? AND b.status = 'pending'
+                FOR UPDATE
+            `;
+            connection.query(checkQuery, [id], (err, results) => {
+                if (err) {
+                    return connection.rollback(() => {
+                        connection.release();
+                        callback(err, null);
+                    });
+                }
+
+                if (results.length === 0) {
+                    return connection.rollback(() => {
+                        connection.release();
+                        callback(new Error('Borrow request not found or not pending'), null);
+                    });
+                }
+
+                const { available, item_count } = results[0];
+                if (available < item_count) {
+                    return connection.rollback(() => {
+                        connection.release();
+                        callback(new Error('Insufficient stock'), null);
+                    });
+                }
+
+                // Now update
+                const updateQuery = `
+                    UPDATE borrow_data b
+                    JOIN items i ON b.id_items = i.id
+                    SET 
+                        b.status = 'taken',
+                        b.id_officer_approval = ?,
+                        b.approval_date = NOW(),
+                        i.available = i.available - b.item_count
+                    WHERE b.id = ?
+                `;
+                connection.query(updateQuery, [officer_id, id], (err, results) => {
+                    if (err) {
+                        return connection.rollback(() => {
+                            connection.release();
+                            callback(err, null);
+                        });
+                    }
+
+                    connection.commit((err) => {
+                        if (err) {
+                            return connection.rollback(() => {
+                                connection.release();
+                                callback(err, null);
+                            });
+                        }
+                        connection.release();
+                        callback(null, results);
+                    });
+                });
+            });
+        });
+    });
 };
 //mesin reject
 const reject = (id, officer_id, notes, callback) => {
@@ -177,6 +236,16 @@ const reject = (id, officer_id, notes, callback) => {
         WHERE id = ? AND status = 'pending'
     `;
     db.query(query, [officer_id, notes, id], callback);
+};
+
+//mesin cancel (for users to cancel their pending requests)
+const cancel = (id, user_id, callback) => {
+    const query = `
+        UPDATE borrow_data 
+        SET status = 'cancelled', notes = 'Cancelled by user'
+        WHERE id = ? AND id_user = ? AND status = 'pending'
+    `;
+    db.query(query, [id, user_id], callback);
 };
 
 //mesin update status
@@ -200,6 +269,7 @@ module.exports = {
     create,
     approve,
     reject,
+    cancel,
     updateStatus,
     deleteById
 };
