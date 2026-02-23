@@ -14,6 +14,7 @@ function Dashboard() {
   });
   const [loading, setLoading] = useState(true);
   const [recentBorrows, setRecentBorrows] = useState([]);
+  const [myBorrows, setMyBorrows] = useState([]);
 
   useEffect(() => {
     loadDashboardData();
@@ -48,6 +49,7 @@ function Dashboard() {
       } else {
         myBorrowsData = await borrowAPI.getMy();
         setRecentBorrows(myBorrowsData.data?.slice(0, 5) || []);
+        setMyBorrows(myBorrowsData.data || []);
       }
 
       if (isAdmin()) {
@@ -65,6 +67,44 @@ function Dashboard() {
       console.error('Failed to load dashboard data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleApprove = async (id) => {
+    if (!window.confirm('Are you sure you want to approve this borrow request?')) return;
+    
+    try {
+      await borrowAPI.approve(id);
+      alert('Borrow request approved successfully!');
+      loadDashboardData();
+    } catch (error) {
+      console.error('Failed to approve borrow:', error);
+      alert('Failed to approve borrow request');
+    }
+  };
+
+  const handleReject = async (id) => {
+    const notes = prompt('Enter rejection reason (optional):');
+    try {
+      await borrowAPI.reject(id, notes);
+      alert('Borrow request rejected successfully!');
+      loadDashboardData();
+    } catch (error) {
+      console.error('Failed to reject borrow:', error);
+      alert('Failed to reject borrow request');
+    }
+  };
+
+  const handleCancel = async (id) => {
+    if (!window.confirm('Are you sure you want to cancel this borrow request?')) return;
+    
+    try {
+      await borrowAPI.cancel(id);
+      alert('Borrow request cancelled successfully!');
+      loadDashboardData();
+    } catch (error) {
+      console.error('Failed to cancel borrow:', error);
+      alert('Failed to cancel borrow request');
     }
   };
 
@@ -146,6 +186,7 @@ function Dashboard() {
                   <th>Quantity</th>
                   <th>Expected Return</th>
                   <th>Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -160,6 +201,32 @@ function Dashboard() {
                       <span className={`badge badge-${borrow.status}`}>
                         {borrow.status}
                       </span>
+                    </td>
+                    <td>
+                      {isAdminOrPetugas() && borrow.status === 'pending' && (
+                        <div className="action-buttons">
+                          <button 
+                            className="btn btn-success btn-sm" 
+                            onClick={() => handleApprove(borrow.id)}
+                          >
+                            Approve
+                          </button>
+                          <button 
+                            className="btn btn-danger btn-sm" 
+                            onClick={() => handleReject(borrow.id)}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      )}
+                      {!isAdminOrPetugas() && borrow.status === 'pending' && (
+                        <button 
+                          className="btn btn-warning btn-sm" 
+                          onClick={() => handleCancel(borrow.id)}
+                        >
+                          Cancel
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

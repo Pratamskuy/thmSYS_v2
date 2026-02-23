@@ -198,6 +198,10 @@ export const borrowAPI = {
       method: 'PUT',
       body: JSON.stringify({ notes }),
     }),
+  cancel: (id) =>
+    apiCall(`/peminjaman/${id}/cancel`, {
+      method: 'PUT',
+    }),
   requestReturn: (id) =>
     apiCall(`/peminjaman/${id}/return`, {
       method: 'PUT',
