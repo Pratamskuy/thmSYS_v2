@@ -85,6 +85,21 @@ body {
   padding-bottom: 0.25rem;
 }
 
+.navbar-user-container {
+  background-color: #f3f4f6; /* light grey */
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  align-items: center;
+  display: inline-flex;
+  gap: 0.45rem;
+}
+
+.navbar-user-container .navbar-link {
+  color: #334155;
+  font-weight: 600;
+}
+
 /* Main Content */
 .main-content {
   flex: 1;

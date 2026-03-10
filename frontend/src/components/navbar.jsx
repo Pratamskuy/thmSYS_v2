@@ -50,7 +50,7 @@ function Navbar() {
             </>
           )}
           <li>
-            <div className="navbar-user-container" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div className="navbar-user-container" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem',  }}>
               <span className="navbar-link" style={{ color: 'var(--text-secondary)' }}>
                 {user.name}
               </span>
