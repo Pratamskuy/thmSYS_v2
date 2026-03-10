@@ -1,4 +1,4 @@
-Global Styles
+/* Global Styles */
 * {
   margin: 0;
   padding: 0;
@@ -219,6 +219,17 @@ body {
   color: white;
 }
 
+.borrow-batch-badge {
+  background: #dbeafe;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
 .borrow-selector-panel {
   margin-bottom: 1rem;
   border: 1px solid var(--border-color);
@@ -296,6 +307,13 @@ body {
   margin-bottom: 1rem;
 }
 
+.borrow-shared-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
 .selected-item-form-card {
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -314,6 +332,13 @@ body {
 .selected-item-form-header h3 {
   margin: 0;
   font-size: 1rem;
+}
+
+.field-help {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -451,6 +476,10 @@ body {
   box-shadow: var(--shadow-lg);
 }
 
+.modal-confirm {
+  max-width: 720px;
+}
+
 .modal-header {
   display: flex;
   justify-content: space-between;
@@ -469,6 +498,32 @@ body {
   font-size: 1.5rem;
   cursor: pointer;
   color: var(--text-secondary);
+}
+
+.confirm-batch-summary {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.confirm-batch-summary p {
+  margin-bottom: 0.35rem;
+  color: var(--text-secondary);
+}
+
+.confirm-batch-summary p:last-child {
+  margin-bottom: 0;
+}
+
+.confirm-batch-summary strong {
+  color: var(--text-primary);
+}
+
+.confirm-batch-table th,
+.confirm-batch-table td {
+  padding: 0.75rem;
 }
 
 /* Auth Pages */

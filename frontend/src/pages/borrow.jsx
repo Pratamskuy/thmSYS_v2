@@ -1,25 +1,31 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { borrowAPI, itemAPI, returnAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+
+const INITIAL_FORM_STATE = {
+  return_date_expected: '',
+  request_notes: '',
+};
 
 function Borrows() {
   const { isAdminOrPetugas, user } = useAuth();
   const [borrows, setBorrows] = useState([]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
   const [filter, setFilter] = useState('all');
   const [reportBorrows, setReportBorrows] = useState([]);
   const [isPrintReady, setIsPrintReady] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedItems, setSelectedItems] = useState([]);
+  const [borrowForm, setBorrowForm] = useState(INITIAL_FORM_STATE);
 
   useEffect(() => {
     loadBorrows();
     loadAvailableItems();
   }, [filter]);
 
-  
   useEffect(() => {
     if (isPrinting && isPrintReady) {
       const timer = setTimeout(() => {
@@ -45,6 +51,7 @@ function Borrows() {
       } else {
         res = await borrowAPI.getMy();
       }
+
       setBorrows(res.data || []);
     } catch (error) {
       console.error('Failed to load borrows:', error);
@@ -70,40 +77,78 @@ function Borrows() {
     return `borrow-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
+  const resetBorrowForm = () => {
+    setSelectedItems([]);
+    setBorrowForm(INITIAL_FORM_STATE);
+    setShowConfirmModal(false);
+  };
+
+  const validateBorrowBatch = () => {
     if (selectedItems.length === 0) {
-      alert('pick at least one item');
-      return;
+      return 'Pick at least one item';
     }
 
-    const hasEmptyReturnDate = selectedItems.some((item) => !item.return_date_expected);
-    if (hasEmptyReturnDate) {
-      alert('fill expected return date for all items');
-      return;
+    if (!borrowForm.return_date_expected) {
+      return 'Expected return date is required';
     }
 
-    const hasInvalidQty = selectedItems.some((item) => Number(item.item_count) < 1 || Number(item.item_count) > Number(item.available));
+    const hasInvalidQty = selectedItems.some((item) => {
+      const qty = Number(item.item_count);
+      return !Number.isFinite(qty) || qty < 1 || qty > Number(item.available);
+    });
+
     if (hasInvalidQty) {
-      alert('item quantity is invalid');
+      return 'Item quantity is invalid';
+    }
+
+    return null;
+  };
+
+  const handleReviewBatch = (e) => {
+    e.preventDefault();
+
+    const validationMessage = validateBorrowBatch();
+    if (validationMessage) {
+      alert(validationMessage);
       return;
     }
+
+    setShowConfirmModal(true);
+  };
+
+  const closeConfirmModal = () => {
+    if (isSubmitting) {
+      return;
+    }
+
+    setShowConfirmModal(false);
+  };
+
+  const handleConfirmSubmit = async () => {
+    const validationMessage = validateBorrowBatch();
+    if (validationMessage) {
+      alert(validationMessage);
+      return;
+    }
+
     try {
+      setIsSubmitting(true);
+
       const idempotencyKey = generateIdempotencyKey();
       const payload = {
+        request_notes: borrowForm.request_notes || null,
         items: selectedItems.map((selectedItem) => ({
           id_items: selectedItem.id,
           item_count: Number(selectedItem.item_count) || 1,
-          return_date_expected: selectedItem.return_date_expected,
-          notes: selectedItem.notes,
+          return_date_expected: borrowForm.return_date_expected,
+          notes: null,
         })),
       };
 
       const response = await borrowAPI.createBatch(payload, idempotencyKey);
-      loadBorrows();
-      loadAvailableItems();
-      closeModal();
+      await Promise.all([loadBorrows(), loadAvailableItems()]);
+      resetBorrowForm();
+
       const requestId = response?.data?.request_id;
       alert(
         response?.message ||
@@ -111,6 +156,8 @@ function Borrows() {
       );
     } catch (error) {
       alert(error.message);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -172,6 +219,7 @@ function Borrows() {
       }
     }
   };
+
   const handlePrintReport = async () => {
     try {
       setIsPrintReady(false);
@@ -183,16 +231,6 @@ function Borrows() {
       setIsPrinting(false);
       alert(error.message);
     }
-  };
-
-  const openCreateModal = () => {
-    setSelectedItems([]);
-    setShowModal(true);
-  };
-
-  const closeModal = () => {
-    setShowModal(false);
-    setSelectedItems([]);
   };
 
   const isItemSelected = (id) => selectedItems.some((selectedItem) => selectedItem.id === id);
@@ -208,10 +246,8 @@ function Borrows() {
         {
           id: item.id,
           item_name: item.item_name,
-          available: item.available,
+          available: Number(item.available) || 0,
           item_count: 1,
-          return_date_expected: '',
-          notes: '',
         },
       ];
     });
@@ -225,51 +261,67 @@ function Borrows() {
     );
   };
 
+  const updateBorrowForm = (field, value) => {
+    setBorrowForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const totalRequestedQuantity = useMemo(
+    () =>
+      selectedItems.reduce((acc, item) => {
+        const qty = Number(item.item_count) || 0;
+        return acc + qty;
+      }, 0),
+    [selectedItems]
+  );
+
   if (loading) {
     return (
       <div className="loading">
         <div className="spinner"></div>
       </div>
     );
+  }
+
+  const formatDate = (dateValue) => {
+    if (!dateValue) return '-';
+    return new Date(dateValue).toLocaleDateString('id-ID');
+  };
+
+  const getOverdueDays = (expectedDate, actualReturnDate) => {
+    if (!expectedDate || !actualReturnDate) {
+      return 0;
     }
 
-    const formatDate = (dateValue) => {
-      if (!dateValue) return '-';
-      return new Date(dateValue).toLocaleDateString('id-ID');
-    };
-  
-    const getOverdueDays = (expectedDate, actualReturnDate) => {
-      if (!expectedDate || !actualReturnDate) {
-        return 0;
-      }
-  
-      const expected = new Date(expectedDate);
-      const returned = new Date(actualReturnDate);
-  
-      if (Number.isNaN(expected.getTime()) || Number.isNaN(returned.getTime())) {
-        return 0;
-      }
-  
-      const diffDays = Math.floor((returned - expected) / (1000 * 60 * 60 * 24));
-      return diffDays > 0 ? diffDays : 0;
-    };
-  
-    const formatFine = (borrow) => {
-      const baseFine = Number(borrow.fine ?? borrow.denda) || 0;
-      let late = Number(borrow.late ?? borrow.terlambat_hari) || 0;
-  
-      if (late <= 0) {
-        late = getOverdueDays(borrow.return_date_expected, borrow.return_date);
-      }
-  
-      const fine = baseFine > 0 ? baseFine : (late > 0 ? late * 5000 : 0);
-  
-      if (fine <= 0 && late <= 0) {
-        return '-';
-      }
-  
-      return `Rp ${fine.toLocaleString('id-ID')} (${late} hari)`;
-    };
+    const expected = new Date(expectedDate);
+    const returned = new Date(actualReturnDate);
+
+    if (Number.isNaN(expected.getTime()) || Number.isNaN(returned.getTime())) {
+      return 0;
+    }
+
+    const diffDays = Math.floor((returned - expected) / (1000 * 60 * 60 * 24));
+    return diffDays > 0 ? diffDays : 0;
+  };
+
+  const formatFine = (borrow) => {
+    const baseFine = Number(borrow.fine ?? borrow.denda) || 0;
+    let late = Number(borrow.late ?? borrow.terlambat_hari) || 0;
+
+    if (late <= 0) {
+      late = getOverdueDays(borrow.return_date_expected, borrow.return_date);
+    }
+
+    const fine = baseFine > 0 ? baseFine : late > 0 ? late * 5000 : 0;
+
+    if (fine <= 0 && late <= 0) {
+      return '-';
+    }
+
+    return `Rp ${fine.toLocaleString('id-ID')} (${late} hari)`;
+  };
+
+  const today = new Date().toISOString().split('T')[0];
+
   return (
     <div>
       <div className="card no-print">
@@ -277,11 +329,7 @@ function Borrows() {
           <h1 className="card-header">
             {isAdminOrPetugas() ? 'Borrow Requests Management' : 'My Borrows'}
           </h1>
-          {!isAdminOrPetugas() && (
-            <button className="btn btn-primary" onClick={openCreateModal}>
-              + New Borrow Request
-            </button>
-          )}
+          {!isAdminOrPetugas() && <div className="borrow-batch-badge">Batch Borrow Form</div>}
         </div>
 
         {isAdminOrPetugas() && (
@@ -306,19 +354,118 @@ function Borrows() {
                 Active
               </button>
             </div>
-            <button className="btn btn-sm btn-secondary"
-              onClick={handlePrintReport}
-              disabled={isPrinting}
-            > {isPrinting ? 'Preparing...' : 'Print Borrow Report'} </button>
+            <button className="btn btn-sm btn-secondary" onClick={handlePrintReport} disabled={isPrinting}>
+              {isPrinting ? 'Preparing...' : 'Print Borrow Report'}
+            </button>
           </div>
-          
         )}
       </div>
+
+      {!isAdminOrPetugas() && (
+        <div className="card no-print">
+          <h2 className="card-header">Create Borrow</h2>
+          <form onSubmit={handleReviewBatch}>
+            <section className="borrow-selector-panel">
+              <div className="borrow-selector-header">
+                <h3>Select Items</h3>
+                <p>Click items to include or remove them from your borrow request.</p>
+              </div>
+              <div className="item-selector-grid">
+                {items.length === 0 ? (
+                  <p className="text-center">No items are available right now.</p>
+                ) : (
+                  items.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`item-selector-card ${isItemSelected(item.id) ? 'selected' : ''}`}
+                      onClick={() => toggleItemSelection(item)}
+                    >
+                      <span className="item-selector-name">{item.item_name}</span>
+                      <span className="item-selector-stock">Available stock: {item.available}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </section>
+
+            {selectedItems.length === 0 ? (
+              <div className="empty-selection-hint">
+                Select at least one item to fill the borrow form.
+              </div>
+            ) : (
+              <div className="selected-items-form-list">
+                {selectedItems.map((selectedItem) => (
+                  <div className="selected-item-form-card" key={selectedItem.id}>
+                    <div className="selected-item-form-header">
+                      <h3>{selectedItem.item_name}</h3>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-danger"
+                        onClick={() => toggleItemSelection(selectedItem)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Quantity *</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        value={selectedItem.item_count}
+                        onChange={(e) => updateSelectedItem(selectedItem.id, 'item_count', e.target.value)}
+                        required
+                        min="1"
+                        max={selectedItem.available}
+                      />
+                      <small className="field-help">Max available: {selectedItem.available}</small>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="borrow-shared-form-grid">
+              <div className="form-group">
+                <label className="form-label">Expected Return Date *</label>
+                <input
+                  type="date"
+                  className="form-input"
+                  value={borrowForm.return_date_expected}
+                  onChange={(e) => updateBorrowForm('return_date_expected', e.target.value)}
+                  min={today}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Batch Notes</label>
+                <textarea
+                  className="form-textarea"
+                  value={borrowForm.request_notes}
+                  onChange={(e) => updateBorrowForm('request_notes', e.target.value)}
+                  placeholder="Optional note for this batch request..."
+                />
+              </div>
+            </div>
+
+            <div className="btn-group">
+              <button type="submit" className="btn btn-primary" disabled={selectedItems.length === 0}>
+                Review Batch
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={resetBorrowForm}>
+                Reset Form
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       <div className="card no-print">
         {borrows.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon">📋</div>
+            <div className="empty-state-icon">[]</div>
             <p>No borrow requests found</p>
           </div>
         ) : (
@@ -348,33 +495,22 @@ function Borrows() {
                     <td>{new Date(borrow.return_date_expected).toLocaleDateString()}</td>
                     <td>{formatFine(borrow)}</td>
                     <td>
-                      <span className={`badge badge-${borrow.status}`}>
-                        {borrow.status}
-                      </span>
+                      <span className={`badge badge-${borrow.status}`}>{borrow.status}</span>
                     </td>
                     <td>
                       <div className="btn-group">
                         {isAdminOrPetugas() && borrow.status === 'pending' && (
                           <>
-                            <button
-                              className="btn btn-sm btn-success"
-                              onClick={() => handleApprove(borrow.id)}
-                            >
+                            <button className="btn btn-sm btn-success" onClick={() => handleApprove(borrow.id)}>
                               Approve
                             </button>
-                            <button
-                              className="btn btn-sm btn-danger"
-                              onClick={() => handleReject(borrow.id)}
-                            >
+                            <button className="btn btn-sm btn-danger" onClick={() => handleReject(borrow.id)}>
                               Reject
                             </button>
                           </>
                         )}
                         {isAdminOrPetugas() && borrow.status === 'queued' && (
-                          <button
-                            className="btn btn-sm btn-danger"
-                            onClick={() => handleReject(borrow.id)}
-                          >
+                          <button className="btn btn-sm btn-danger" onClick={() => handleReject(borrow.id)}>
                             Reject
                           </button>
                         )}
@@ -396,10 +532,7 @@ function Borrows() {
                         )}
                         {!isAdminOrPetugas() &&
                           (borrow.status === 'pending' || borrow.status === 'queued') && (
-                            <button
-                              className="btn btn-sm btn-danger"
-                              onClick={() => handleCancel(borrow.id)}
-                            >
+                            <button className="btn btn-sm btn-danger" onClick={() => handleCancel(borrow.id)}>
                               Cancel
                             </button>
                           )}
@@ -413,8 +546,6 @@ function Borrows() {
         )}
       </div>
 
-
-
       {isAdminOrPetugas() && (
         <section className="print-only">
           <div className="report-header">
@@ -424,14 +555,10 @@ function Borrows() {
                 Dicetak oleh: {user?.full_name || user?.name || 'Petugas/Admin'}
               </p>
             </div>
-            <div className="report-meta">
-              Tanggal cetak: {new Date().toLocaleString('id-ID')}
-            </div>
+            <div className="report-meta">Tanggal cetak: {new Date().toLocaleString('id-ID')}</div>
           </div>
 
-          <p className="report-summary">
-            Total transaksi peminjaman: {reportBorrows.length}
-          </p>
+          <p className="report-summary">Total transaksi peminjaman: {reportBorrows.length}</p>
 
           <table className="table report-table">
             <thead>
@@ -471,109 +598,71 @@ function Borrows() {
           </table>
         </section>
       )}
-  
-      {showModal && (
-        <div className="modal-overlay" onClick={closeModal}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+
+      {showConfirmModal && (
+        <div className="modal-overlay" onClick={closeConfirmModal}>
+          <div className="modal modal-confirm" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 className="modal-title">New Borrow Request</h2>
-              <button className="modal-close" onClick={closeModal}>×</button>
+              <h2 className="modal-title">Confirm Borrow Batch</h2>
+              <button className="modal-close" onClick={closeConfirmModal} disabled={isSubmitting}>
+                x
+              </button>
             </div>
-            
-            <section className="borrow-selector-panel">
-              <div className="borrow-selector-header">
-                <h3>Pilih Item Dulu</h3>
-                <p>Klik item untuk menambah/menghapus dari daftar pengajuan.</p>
-              </div>
 
-              <div className="item-selector-grid">
-                {items.length === 0 ? (
-                  <p className="text-center">Tidak ada item yang tersedia saat ini.</p>
-                ) : (
-                  items.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={`item-selector-card ${isItemSelected(item.id) ? 'selected' : ''}`}
-                      onClick={() => toggleItemSelection(item)}
-                    >
-                      <span className="item-selector-name">{item.item_name}</span>
-                      <span className="item-selector-stock">Stok tersedia: {item.available}</span>
-                    </button>
-                  ))
-                )}
-              </div>
-            </section>  
-              <form onSubmit={handleSubmit}>
-              {selectedItems.length === 0 ? (
-                <div className="empty-selection-hint">Pilih minimal 1 item untuk menampilkan form peminjaman.</div>
-              ) : (
-                <div className="selected-items-form-list">
+            <div className="confirm-batch-summary">
+              <p>
+                <strong>Items selected:</strong> {selectedItems.length}
+              </p>
+              <p>
+                <strong>Total quantity:</strong> {totalRequestedQuantity}
+              </p>
+              <p>
+                <strong>Expected return:</strong> {formatDate(borrowForm.return_date_expected)}
+              </p>
+              <p>
+                <strong>Batch notes:</strong> {borrowForm.request_notes || '-'}
+              </p>
+            </div>
+
+            <div className="table-container">
+              <table className="table confirm-batch-table">
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>Requested Qty</th>
+                    <th>Available</th>
+                  </tr>
+                </thead>
+                <tbody>
                   {selectedItems.map((selectedItem) => (
-                    <div className="selected-item-form-card" key={selectedItem.id}>
-                      <div className="selected-item-form-header">
-                        <h3>{selectedItem.item_name}</h3>
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-danger"
-                          onClick={() => toggleItemSelection(selectedItem)}
-                        >
-                          Hapus
-                        </button>
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label">Quantity *</label>
-                        <input
-                          type="number"
-                          className="form-input"
-                          value={selectedItem.item_count}
-                          onChange={(e) =>
-                            updateSelectedItem(selectedItem.id, 'item_count', e.target.value)
-                          }
-                          required
-                          min="1"
-                          max={selectedItem.available}
-                        />
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label">Expected Return Date *</label>
-                        <input
-                          type="date"
-                          className="form-input"
-                          value={selectedItem.return_date_expected}
-                          onChange={(e) =>
-                            updateSelectedItem(selectedItem.id, 'return_date_expected', e.target.value)
-                          }
-                          required
-                          min={new Date().toISOString().split('T')[0]}
-                        />
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label">Notes</label>
-                        <textarea
-                          className="form-textarea"
-                          value={selectedItem.notes}
-                          onChange={(e) => updateSelectedItem(selectedItem.id, 'notes', e.target.value)}
-                          placeholder="Purpose of borrowing..."
-                        />
-                      </div>
-                    </div>
+                    <tr key={`confirm-${selectedItem.id}`}>
+                      <td>{selectedItem.item_name}</td>
+                      <td>{selectedItem.item_count}</td>
+                      <td>{selectedItem.available}</td>
+                    </tr>
                   ))}
-                </div>
-              )}
+                </tbody>
+              </table>
+            </div>
 
-              <div className="btn-group">
-                <button type="submit" className="btn btn-primary"  disabled={selectedItems.length === 0}>
-                  Submit Request
-                </button>
-                <button type="button" className="btn btn-secondary" onClick={closeModal}>
-                  Cancel
-                </button>
-              </div>  
-            </form>
+            <div className="btn-group mt-2">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleConfirmSubmit}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? 'Submitting...' : 'Confirm & Submit'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={closeConfirmModal}
+                disabled={isSubmitting}
+              >
+                Back
+              </button>
+            </div>
           </div>
         </div>
       )}
