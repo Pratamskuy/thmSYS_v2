@@ -1,17 +1,17 @@
-*anw the version 2 of my project has an additional feature where i add the multi borrow feature*
+*Versi 2 menambahkan fitur batch borrow (multi-item) dengan kuantitas per item.*
 # THM System v2
 
-Sistem manajemen peminjaman alat (Tool & Hardware Management) berbasis **full-stack JavaScript** dengan fitur autentikasi, manajemen item, alur peminjaman-pengembalian, dan kontrol akses berbasis peran.
+Sistem manajemen peminjaman alat (Tool & Hardware Management) berbasis full-stack JavaScript dengan fitur autentikasi, manajemen item, alur peminjaman-pengembalian, dan kontrol akses berbasis peran.
 
 ## Ringkasan Proyek
 
 THM System v2 dirancang untuk mendukung proses operasional peminjaman alat secara terstruktur untuk tiga jenis pengguna utama:
 
-- **Admin**: akses penuh (user, kategori, item, peminjaman, pengembalian, log).
-- **Petugas**: mengelola alur peminjaman/pengembalian.
-- **Peminjam**: mengajukan peminjaman dan pengembalian item.
+- Admin: akses penuh (user, kategori, item, peminjaman, pengembalian, log).
+- Petugas: mengelola alur peminjaman/pengembalian.
+- Peminjam: mengajukan peminjaman dan pengembalian item.
 
-Versi 2 menambahkan kemampuan **multi borrow** (mengajukan beberapa item dalam satu proses dari sisi UI).
+Versi 2 menambahkan kemampuan batch borrow (mengajukan beberapa item sekaligus, kuantitas per item) melalui form halaman dan modal konfirmasi.
 
 ---
 
@@ -19,20 +19,20 @@ Versi 2 menambahkan kemampuan **multi borrow** (mengajukan beberapa item dalam s
 
 ### 1) Backend
 
-- Runtime: **Node.js**
-- Framework: **Express**
-- Database: **MySQL**
-- Autentikasi: **JWT**
-- Upload file: **Multer**
+- Runtime: Node.js
+- Framework: Express
+- Database: MySQL
+- Autentikasi: JWT
+- Upload file: Multer
 
 Backend berjalan default di port `3000` dan mengekspose semua endpoint pada prefix `/api`.
 
 ### 2) Frontend
 
-- Framework: **React**
-- Build tool: **Vite**
-- Routing: **react-router-dom**
-- State auth global: **Context API**
+- Framework: React
+- Build tool: Vite
+- Routing: react-router-dom
+- State auth global: Context API
 
 Frontend mengonsumsi API backend melalui service terpusat di `src/services/api.js`.
 
@@ -40,16 +40,16 @@ Frontend mengonsumsi API backend melalui service terpusat di `src/services/api.j
 
 ## Fitur Utama
 
-## 1. Autentikasi & Otorisasi
+## 1. Autentikasi dan Otorisasi
 
 - Login/register pengguna.
-- Penyimpanan token JWT di `localStorage`.
+- Penyimpanan token JWT di localStorage.
 - Verifikasi token untuk route yang dilindungi.
 - Role-based access control (Admin/Petugas/Peminjam).
 
 ## 2. Dashboard Dinamis per Role
 
-- Statistik item total & tersedia.
+- Statistik item total dan tersedia.
 - Statistik peminjaman pending/aktif untuk admin/petugas.
 - Statistik peminjaman pribadi untuk peminjam.
 - Ringkasan transaksi terbaru.
@@ -58,8 +58,9 @@ Frontend mengonsumsi API backend melalui service terpusat di `src/services/api.j
 
 - Lihat daftar item.
 - CRUD item (admin).
-- Tracking stok (`total`, `available`, dan jumlah dipinjam).
-- Kondisi item (`normal`, `ok`, `not good`, `broken`).
+- Tracking stok (total, available, dipinjam hanya setelah approve).
+- Menampilkan jumlah request yang belum di-approve sebagai Dalam Antrian.
+- Kondisi item (normal, ok, not good, broken).
 
 ## 4. Manajemen Kategori
 
@@ -77,7 +78,8 @@ Frontend mengonsumsi API backend melalui service terpusat di `src/services/api.j
 - Peminjam membuat pengajuan peminjaman.
 - Admin/petugas melakukan approve/reject.
 - Filter data peminjaman (all/pending/active).
-- Fitur **multi borrow** pada UI: user dapat memilih beberapa item dan mengirim pengajuan sekaligus.
+- Fitur batch borrow pada UI: user dapat memilih beberapa item, mengatur quantity per item, lalu konfirmasi batch dalam satu submit.
+- Saat request dibuat, stok available langsung berkurang (reserve) untuk status pending. Jika stok tidak cukup, item masuk status queued.
 
 ## 7. Pengembalian (Return)
 
@@ -96,26 +98,26 @@ Frontend mengonsumsi API backend melalui service terpusat di `src/services/api.j
 
 ```bash
 thmSYS_v2/
-├── backend/
-│   ├── controllers/
-│   ├── middleware/
-│   ├── models/
-│   ├── routes/
-│   ├── db.js
-│   ├── index.js
-│   └── package.json
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   ├── context/
-│   │   ├── pages/
-│   │   ├── services/
-│   │   ├── App.jsx
-│   │   └── main.jsx
-│   └── package.json
-└── docs/
-    ├── PROJECT_SUMMARY.md
-    └── SETUP_GUIDE.md
+|- backend/
+|  |- controllers/
+|  |- middleware/
+|  |- models/
+|  |- routes/
+|  |- db.js
+|  |- index.js
+|  `- package.json
+|- frontend/
+|  |- src/
+|  |  |- components/
+|  |  |- context/
+|  |  |- pages/
+|  |  |- services/
+|  |  |- App.jsx
+|  |  `- main.jsx
+|  `- package.json
+`- docs/
+   |- PROJECT_SUMMARY.md
+   `- SETUP_GUIDE.md
 ```
 
 ---
@@ -176,12 +178,13 @@ thmSYS_v2/
 ## Alur Utama Proses Bisnis
 
 1. User login ke sistem.
-2. Peminjam memilih item dan membuat pengajuan peminjaman.
+2. Peminjam memilih item dan membuat pengajuan peminjaman batch.
 3. Admin/petugas meninjau pengajuan lalu approve/reject.
-4. Jika approve, stok item berkurang dan status peminjaman berubah menjadi aktif (`taken`).
-5. Peminjam mengajukan return saat item selesai dipakai.
-6. Admin/petugas mengonfirmasi return.
-7. Status peminjaman selesai (`available`), stok item kembali bertambah.
+4. Saat request dibuat, stok available berkurang untuk pending (reserve). Jika stok tidak cukup, status menjadi queued.
+5. Jika approve, status peminjaman berubah menjadi aktif (taken) dan tercatat sebagai Dipinjam di manajemen item.
+6. Peminjam mengajukan return saat item selesai dipakai.
+7. Admin/petugas mengonfirmasi return.
+8. Status peminjaman selesai (available), stok item kembali bertambah.
 
 ---
 
