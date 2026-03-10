@@ -1,4 +1,5 @@
 const item = require('../models/item');
+const borrow = require('../models/pinjam');
 const LogAktivitas = require('../models/activityLog');
 
 // ===== GET ALL ALAT =====
@@ -165,33 +166,51 @@ const update = (req, res) => {
 const deleteitem = (req, res) => {
     const { id } = req.params;
 
-    item.deleteById(id, (err, results) => {
+    // Prevent deleting items with active borrows
+    borrow.hasActiveByItem(id, (err, activeCount) => {
         if (err) {
             return res.status(500).json({
                 success: false,
-                message: "Gagal menghapus alat",
+                message: 'Gagal memeriksa status peminjaman item',
                 error: err.message
             });
         }
-        if (results.affectedRows === 0) {
-            return res.status(404).json({
+
+        if (activeCount > 0) {
+            return res.status(400).json({
                 success: false,
-                message: "item tidak ditemukan"
+                message: 'Item memiliki peminjaman aktif dan tidak dapat dihapus'
             });
         }
 
-        // Catat log aktivitas
-        LogAktivitas.create({
-            id_user: req.userId,
-            aksi: 'DELETE',
-            tabel_terkait: 'alat',
-            id_data: id,
-            keterangan: `item dihapus: ID ${id}`
-        }, () => { });
+        item.deleteById(id, (deleteErr, results) => {
+            if (deleteErr) {
+                return res.status(500).json({
+                    success: false,
+                    message: "Gagal menghapus alat",
+                    error: deleteErr.message
+                });
+            }
+            if (results.affectedRows === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "item tidak ditemukan"
+                });
+            }
 
-        res.status(200).json({
-            success: true,
-            message: "Berhasil menghapus alat"
+            // Catat log aktivitas
+            LogAktivitas.create({
+                id_user: req.userId,
+                aksi: 'DELETE',
+                tabel_terkait: 'alat',
+                id_data: id,
+                keterangan: `item dihapus: ID ${id}`
+            }, () => { });
+
+            res.status(200).json({
+                success: true,
+                message: "Berhasil menghapus alat"
+            });
         });
     });
 };

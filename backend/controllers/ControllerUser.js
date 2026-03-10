@@ -1,4 +1,5 @@
 const User = require('../models/user');
+const borrow = require('../models/pinjam');
 const jwt = require('jsonwebtoken');
 const activityLog = require('../models/activityLog');
 require('dotenv').config();
@@ -209,33 +210,60 @@ const update = (req, res) => {
 const deleteUser = (req, res) => {
     const { id } = req.params;
 
-    User.deleteById(id, (err, results) => {
+    // Prevent admins from deleting themselves
+    if (Number(req.user.id) === Number(id)) {
+        return res.status(403).json({
+            success: false,
+            message: 'Admin tidak dapat menghapus dirinya sendiri'
+        });
+    }
+
+    // Prevent deleting users with active borrows
+    borrow.hasActiveByUser(id, (err, activeCount) => {
         if (err) {
             return res.status(500).json({
                 success: false,
-                message: "Gagal menghapus user",
+                message: 'Gagal memeriksa status peminjaman user',
                 error: err.message
             });
         }
-        if (results.affectedRows === 0) {
-            return res.status(404).json({
+
+        if (activeCount > 0) {
+            return res.status(400).json({
                 success: false,
-                message: "User tidak ditemukan"
+                message: 'User memiliki peminjaman aktif dan tidak dapat dihapus'
             });
         }
 
-        // Catat log aktivitas
-        activityLog.create({
-            id_user: req.userId,
-            action: 'DELETE',
-            table_affected: 'users',
-            id_data: id,
-            notes: `User dihapus: ID ${id}`
-        }, () => { });
+        User.deleteById(id, (deleteErr, results) => {
+            if (deleteErr) {
+                return res.status(500).json({
+                    success: false,
+                    message: "Gagal menghapus user",
+                    error: deleteErr.message
+                });
+            }
 
-        res.status(200).json({
-            success: true,
-            message: "Berhasil menghapus user"
+            if (results.affectedRows === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: "User tidak ditemukan"
+                });
+            }
+
+            // Catat log aktivitas
+            activityLog.create({
+                id_user: req.userId,
+                action: 'DELETE',
+                table_affected: 'users',
+                id_data: id,
+                notes: `User dihapus: ID ${id}`
+            }, () => { });
+
+            res.status(200).json({
+                success: true,
+                message: "Berhasil menghapus user"
+            });
         });
     });
 };

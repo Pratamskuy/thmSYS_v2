@@ -484,6 +484,32 @@ const getActive = (callback) => {
     db.query(query, callback);
 };
 
+const hasActiveByUser = (id_user, callback) => {
+    const query = `
+        SELECT COUNT(*) AS activeCount
+        FROM borrow_data
+        WHERE id_user = ? AND status IN ('taken', 'waiting for return')
+    `;
+
+    db.query(query, [id_user], (err, results) => {
+        if (err) return callback(err, null);
+        callback(null, results[0]?.activeCount || 0);
+    });
+};
+
+const hasActiveByItem = (id_items, callback) => {
+    const query = `
+        SELECT COUNT(*) AS activeCount
+        FROM borrow_data
+        WHERE id_items = ? AND status IN ('taken', 'waiting for return')
+    `;
+
+    db.query(query, [id_items], (err, results) => {
+        if (err) return callback(err, null);
+        callback(null, results[0]?.activeCount || 0);
+    });
+};
+
 const getReturnRequests = (callback) => {
     const query = `
         SELECT
@@ -1075,6 +1101,8 @@ module.exports = {
     getPending,
     getActive,
     getReturnRequests,
+    hasActiveByUser,
+    hasActiveByItem,
     create,
     createBatch,
     approve,
