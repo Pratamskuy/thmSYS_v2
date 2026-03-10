@@ -50,14 +50,14 @@ function Navbar() {
             </>
           )}
           <li>
-            <span className="navbar-link" style={{ color: 'var(--text-secondary)' }}>
-              {user.name}
-            </span>
-          </li>
-          <li>
-            <button onClick={handleLogout} className="btn btn-sm btn-danger">
-              Logout
-            </button>
+            <div className="navbar-user-container" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span className="navbar-link" style={{ color: 'var(--text-secondary)' }}>
+                {user.name}
+              </span>
+              <button onClick={handleLogout} className="btn btn-sm btn-danger">
+                Logout
+              </button>
+            </div>
           </li>
         </ul>
       </div>

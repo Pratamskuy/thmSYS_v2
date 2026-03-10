@@ -7,7 +7,6 @@ function Dashboard() {
   const [stats, setStats] = useState({
     totalItems: 0,
     availableItems: 0,
-    pendingBorrows: 0,
     queuedBorrows: 0,
     activeBorrows: 0,
     myBorrows: 0,
@@ -135,19 +134,14 @@ function Dashboard() {
           <p>Total Items</p>
         </div>
         
-        <div className="stat-card success">
+        <div className="stat-card">
           <h3>{stats.availableItems}</h3>
           <p>Available Items</p>
         </div>
 
         {isAdminOrPetugas() && (
           <>
-            <div className="stat-card warning">
-              <h3>{stats.pendingBorrows}</h3>
-              <p>Pending Requests</p>
-            </div>
-
-            <div className="stat-card info">
+            <div className="stat-card">
               <h3>{stats.queuedBorrows}</h3>
               <p>Queued Borrows</p>
             </div>
@@ -167,7 +161,7 @@ function Dashboard() {
         )}
 
         {isAdmin() && (
-          <div className="stat-card danger">
+          <div className="stat-card">
             <h3>{stats.totalUsers}</h3>
             <p>Total Users</p>
           </div>
