@@ -19,6 +19,9 @@ function Borrows() {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedItems, setSelectedItems] = useState([]);
+  const [activeTab, setActiveTab] = useState('create');
+  const [batchRequests, setBatchRequests] = useState([]);
+  const [adminBatches, setAdminBatches] = useState([]);
   const [borrowForm, setBorrowForm] = useState(INITIAL_FORM_STATE);
 
   useEffect(() => {
@@ -48,11 +51,15 @@ function Borrows() {
         } else {
           res = await borrowAPI.getAll();
         }
-      } else {
-        res = await borrowAPI.getMy();
-      }
 
-      setBorrows(res.data || []);
+        const batchRes = await borrowAPI.getBatches();
+        setBorrows(res.data || []);
+        setAdminBatches(batchRes.data || []);
+      } else {
+        const [myRes, requestRes] = await Promise.all([borrowAPI.getMy(), borrowAPI.getRequests()]);
+        setBorrows(myRes.data || []);
+        setBatchRequests(requestRes.data || []);
+      }
     } catch (error) {
       console.error('Failed to load borrows:', error);
     } finally {
@@ -190,6 +197,30 @@ function Borrows() {
         await borrowAPI.requestReturn(id);
         loadBorrows();
         alert('Return request submitted!');
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+  };
+
+  const handleApproveBatch = async (requestId) => {
+    if (!window.confirm(`Approve batch request #${requestId}?`)) return;
+
+    try {
+      await borrowAPI.approveBatch(requestId);
+      await loadBorrows();
+      alert(`Batch request #${requestId} approved successfully!`);
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+
+  const handleRequestReturnBatch = async (requestId) => {
+    if (window.confirm('Request to return this batch of borrows?')) {
+      try {
+        await borrowAPI.requestReturnBatch(requestId);
+        await loadBorrows();
+        alert('Batch return request submitted successfully!');
       } catch (error) {
         alert(error.message);
       }
@@ -361,10 +392,50 @@ function Borrows() {
         )}
       </div>
 
+      {isAdminOrPetugas() && (
+        <div className="card no-print">
+          <div className="btn-group" style={{ margin: '1rem 0' }}>
+            <button
+              className={`btn btn-sm ${activeTab === 'table' ? 'btn-primary' : 'btn-secondary'}`}
+              type="button"
+              onClick={() => setActiveTab('table')}
+            >
+              Detail Item
+            </button>
+            <button
+              className={`btn btn-sm ${activeTab === 'batch' ? 'btn-primary' : 'btn-secondary'}`}
+              type="button"
+              onClick={() => setActiveTab('batch')}
+            >
+              Riwayat Batch
+            </button>
+          </div>
+        </div>
+      )}
+
       {!isAdminOrPetugas() && (
         <div className="card no-print">
-          <h2 className="card-header">Create Borrow</h2>
-          <form onSubmit={handleReviewBatch}>
+          <div className="btn-group" style={{ margin: '1rem 0' }}>
+            <button
+              className={`btn btn-sm ${activeTab === 'create' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setActiveTab('create')}
+              type="button"
+            >
+              Keranjang Peminjaman
+            </button>
+            <button
+              className={`btn btn-sm ${activeTab === 'history' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setActiveTab('history')}
+              type="button"
+            >
+              Riwayat Batch Peminjaman
+            </button>
+          </div>
+
+          {activeTab === 'create' && (
+            <>
+              <h2 className="card-header">Create Borrow</h2>
+              <form onSubmit={handleReviewBatch}>
             <section className="borrow-selector-panel">
               <div className="borrow-selector-header">
                 <h3>Select Items</h3>
@@ -459,22 +530,79 @@ function Borrows() {
               </button>
             </div>
           </form>
-        </div>
+        </>
+        )}
+
+        {activeTab === 'history' && (
+          <div>
+            <h2 className="card-header">Riwayat Batch Peminjaman</h2>
+            {batchRequests.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-state-icon">[]</div>
+                <p>No batch requests found</p>
+              </div>
+            ) : (
+              <div className="table-container">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Request ID</th>
+                      <th>Status</th>
+                      <th>Submitted At</th>
+                      <th>Total Items</th>
+                      <th>Taken Items</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {batchRequests.map((request) => {
+                      const items = request.items || [];
+                      const totalItems = items.length;
+                      const takenItems = items.filter((i) => i.borrow_status === 'taken').length;
+                      const isReturnAllowed = takenItems > 0;
+
+                      return (
+                        <tr key={`batch-${request.request_id}`}>
+                          <td>#{request.request_id}</td>
+                          <td>{request.request_status}</td>
+                          <td>{new Date(request.submitted_at).toLocaleString('id-ID')}</td>
+                          <td>{totalItems}</td>
+                          <td>{takenItems}</td>
+                          <td>
+                            <button
+                              className="btn btn-sm btn-warning"
+                              onClick={() => handleRequestReturnBatch(request.request_id)}
+                              disabled={!isReturnAllowed}
+                            >
+                              Request Return
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
       )}
 
-      <div className="card no-print">
-        {borrows.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-state-icon">[]</div>
-            <p>No borrow requests found</p>
-          </div>
-        ) : (
+      {isAdminOrPetugas() && activeTab === 'table' && (
+        <div className="card no-print">
+          {borrows.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-state-icon">[]</div>
+              <p>No borrow requests found</p>
+            </div>
+          ) : (
           <div className="table-container">
             <table className="table">
               <thead>
                 <tr>
                   <th>ID</th>
-                  {isAdminOrPetugas() && <th>Borrower</th>}
+                  <th>Borrower</th>
                   <th>Item</th>
                   <th>Quantity</th>
                   <th>Borrow Date</th>
@@ -488,7 +616,7 @@ function Borrows() {
                 {borrows.map((borrow) => (
                   <tr key={borrow.id}>
                     <td>#{borrow.id}</td>
-                    {isAdminOrPetugas() && <td>{borrow.full_name}</td>}
+                    <td>{borrow.full_name}</td>
                     <td>{borrow.item_name}</td>
                     <td>{borrow.item_count}</td>
                     <td>{new Date(borrow.borrow_date).toLocaleDateString()}</td>
@@ -499,7 +627,7 @@ function Borrows() {
                     </td>
                     <td>
                       <div className="btn-group">
-                        {isAdminOrPetugas() && borrow.status === 'pending' && (
+                        {borrow.status === 'pending' && (
                           <>
                             <button className="btn btn-sm btn-success" onClick={() => handleApprove(borrow.id)}>
                               Approve
@@ -509,12 +637,12 @@ function Borrows() {
                             </button>
                           </>
                         )}
-                        {isAdminOrPetugas() && borrow.status === 'queued' && (
+                        {borrow.status === 'queued' && (
                           <button className="btn btn-sm btn-danger" onClick={() => handleReject(borrow.id)}>
                             Reject
                           </button>
                         )}
-                        {isAdminOrPetugas() && borrow.status === 'waiting for return' && (
+                        {borrow.status === 'waiting for return' && (
                           <button
                             className="btn btn-sm btn-primary"
                             onClick={() => handleConfirmReturn(borrow.id)}
@@ -522,20 +650,6 @@ function Borrows() {
                             Accept Return
                           </button>
                         )}
-                        {!isAdminOrPetugas() && borrow.status === 'taken' && (
-                          <button
-                            className="btn btn-sm btn-warning"
-                            onClick={() => handleRequestReturn(borrow.id)}
-                          >
-                            Request Return
-                          </button>
-                        )}
-                        {!isAdminOrPetugas() &&
-                          (borrow.status === 'pending' || borrow.status === 'queued') && (
-                            <button className="btn btn-sm btn-danger" onClick={() => handleCancel(borrow.id)}>
-                              Cancel
-                            </button>
-                          )}
                       </div>
                     </td>
                   </tr>
@@ -545,12 +659,96 @@ function Borrows() {
           </div>
         )}
       </div>
+      )}
+
+      {isAdminOrPetugas() && activeTab === 'batch' && (
+        <div className="card no-print">
+          {adminBatches.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-state-icon">[]</div>
+              <p>No batch requests found</p>
+            </div>
+          ) : (
+            <div className="table-container">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Request ID</th>
+                    <th>Borrower</th>
+                    <th>Status</th>
+                    <th>Submitted At</th>
+                    <th>Total Items</th>
+                    <th>Taken Items</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adminBatches.map((batch) => {
+                    const totalItems = batch.items.length;
+                    const takenItems = batch.items.filter((item) => item.borrow_status === 'taken').length;
+                    const pendingItems = batch.items.filter((item) => item.borrow_status === 'pending').length;
+
+                    return (
+                      <>
+                        <tr key={`batch-${batch.request_id}`}>
+                          <td>#{batch.request_id}</td>
+                          <td>{batch.borrower}</td>
+                          <td>{batch.request_status}</td>
+                          <td>{new Date(batch.submitted_at).toLocaleString('id-ID')}</td>
+                          <td>{totalItems}</td>
+                          <td>{takenItems}</td>
+                          <td>
+                            <button
+                              className="btn btn-sm btn-success"
+                              onClick={() => handleApproveBatch(batch.request_id)}
+                              disabled={pendingItems === 0}
+                            >
+                              Approve Batch
+                            </button>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td colSpan="7">
+                            <strong>Details:</strong>
+                            <div className="table-container">
+                              <table className="table">
+                                <thead>
+                                  <tr>
+                                    <th>Item</th>
+                                    <th>Qty</th>
+                                    <th>Return</th>
+                                    <th>Status</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {batch.items.map((item) => (
+                                    <tr key={`batch-item-${item.borrow_id}`}>
+                                      <td>{item.item_name}</td>
+                                      <td>{item.item_count}</td>
+                                      <td>{new Date(item.return_date_expected).toLocaleDateString()}</td>
+                                      <td>{item.borrow_status}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      </>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {isAdminOrPetugas() && (
         <section className="print-only">
           <div className="report-header">
             <div>
-              <h2>Laporan Riwayat Peminjaman</h2>
+              <h2>Laporan Riwayat Batch Peminjaman</h2>
               <p className="report-meta">
                 Dicetak oleh: {user?.full_name || user?.name || 'Petugas/Admin'}
               </p>
@@ -558,44 +756,36 @@ function Borrows() {
             <div className="report-meta">Tanggal cetak: {new Date().toLocaleString('id-ID')}</div>
           </div>
 
-          <p className="report-summary">Total transaksi peminjaman: {reportBorrows.length}</p>
+          <p className="report-summary">Total batch: {adminBatches.length}</p>
 
-          <table className="table report-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Peminjam</th>
-                <th>Item</th>
-                <th>Qty</th>
-                <th>Tgl Pinjam</th>
-                <th>Tgl Kembali</th>
-                <th>Denda</th>
-                <th>Status</th>
-                <th>Petugas</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reportBorrows.length === 0 ? (
-                <tr>
-                  <td colSpan="9">Tidak ada data peminjaman.</td>
-                </tr>
-              ) : (
-                reportBorrows.map((borrow) => (
-                  <tr key={`report-${borrow.id}`}>
-                    <td>#{borrow.id}</td>
-                    <td>{borrow.full_name || '-'}</td>
-                    <td>{borrow.item_name || '-'}</td>
-                    <td>{borrow.item_count || 0}</td>
-                    <td>{formatDate(borrow.borrow_date)}</td>
-                    <td>{formatDate(borrow.return_date_expected)}</td>
-                    <td>{formatFine(borrow)}</td>
-                    <td>{borrow.status || '-'}</td>
-                    <td>{borrow.officer_name || '-'}</td>
+          {adminBatches.map((batch) => (
+            <div key={`print-batch-${batch.request_id}`} style={{ marginBottom: '1.5rem' }}>
+              <h3>Batch #{batch.request_id} ({batch.request_status})</h3>
+              <p>
+                Peminjam: {batch.borrower} | Submit: {new Date(batch.submitted_at).toLocaleString('id-ID')}
+              </p>
+              <table className="table report-table">
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>Qty</th>
+                    <th>Return</th>
+                    <th>Status</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {batch.items.map((item) => (
+                    <tr key={`print-batch-item-${item.borrow_id}`}>
+                      <td>{item.item_name || '-'}</td>
+                      <td>{item.item_count || 0}</td>
+                      <td>{formatDate(item.return_date_expected)}</td>
+                      <td>{item.borrow_status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
         </section>
       )}
 

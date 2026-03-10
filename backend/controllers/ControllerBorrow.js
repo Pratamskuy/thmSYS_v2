@@ -192,6 +192,151 @@ const getMyborrow = (req, res) => {
     });
 };
 
+const getRequestBatches = (req, res) => {
+    borrow.getRequestBatches((err, results) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                message: 'Gagal mengambil riwayat batch peminjaman',
+                error: err.message,
+            });
+        }
+
+        const requests = results.reduce((acc, row) => {
+            if (!acc[row.request_id]) {
+                acc[row.request_id] = {
+                    request_id: row.request_id,
+                    id_user: row.id_user,
+                    borrower: row.borrower,
+                    request_status: row.request_status,
+                    request_notes: row.request_notes,
+                    submitted_at: row.submitted_at,
+                    items: [],
+                };
+            }
+
+            if (row.borrow_id) {
+                acc[row.request_id].items.push({
+                    borrow_id: row.borrow_id,
+                    id_items: row.id_items,
+                    item_name: row.item_name,
+                    item_count: row.item_count,
+                    return_date_expected: row.return_date_expected,
+                    borrow_status: row.borrow_status,
+                });
+            }
+
+            return acc;
+        }, {});
+
+        res.status(200).json({
+            success: true,
+            data: Object.values(requests),
+        });
+    });
+};
+
+const approveBatch = (req, res) => {
+    const { requestId } = req.params;
+    const officerId = req.user.id;
+
+    borrow.approveBatch(requestId, officerId, (err, result) => {
+        if (err) {
+            return mapBorrowError(err, res, 'Gagal menyetujui batch peminjaman');
+        }
+
+        res.status(200).json({
+            success: true,
+            message: `Batch peminjaman #${requestId} berhasil disetujui`,
+            data: result,
+        });
+    });
+};
+
+const requestReturnByRequest = (req, res) => {
+    const requestId = req.params.requestId;
+    const userId = req.user.id;
+
+    borrow.requestReturnByRequest(requestId, userId, (err, result) => {
+        if (err) {
+            if (err.code === 'NO_TAKEN_ITEMS') {
+                return res.status(400).json({
+                    success: false,
+                    message: err.message,
+                });
+            }
+            return mapBorrowError(err, res, 'Gagal mengajukan pengembalian batch');
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Permintaan pengembalian batch berhasil diajukan',
+            data: result,
+        });
+    });
+};
+
+const getRequestsByUser = (req, res) => {
+    const id_user = req.user.id;
+
+    borrow.getRequestsByUser(id_user, (err, results) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                message: 'Gagal mengambil riwayat batch peminjaman',
+                error: err.message,
+            });
+        }
+
+        // Group by request_id for clean batch front-end structure
+        const requests = results.reduce((acc, row) => {
+            if (!acc[row.request_id]) {
+                acc[row.request_id] = {
+                    request_id: row.request_id,
+                    request_status: row.request_status,
+                    request_notes: row.request_notes,
+                    submitted_at: row.submitted_at,
+                    items: [],
+                };
+            }
+            if (row.borrow_id) {
+                acc[row.request_id].items.push({
+                    borrow_id: row.borrow_id,
+                    id_items: row.id_items,
+                    item_name: row.item_name,
+                    item_count: row.item_count,
+                    return_date_expected: row.return_date_expected,
+                    borrow_status: row.borrow_status,
+                });
+            }
+            return acc;
+        }, {});
+
+        res.status(200).json({
+            success: true,
+            data: Object.values(requests),
+        });
+    });
+};
+
+const expirePendingBorrows = (req, res) => {
+    borrow.expirePendingBorrows((err, result) => {
+        if (err) {
+            return res.status(500).json({
+                success: false,
+                message: 'Gagal meng-expire peminjaman pending',
+                error: err.message,
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: `${result.expiredCount || 0} peminjaman pending kedaluwarsa dan dibatalkan`,
+            data: result,
+        });
+    });
+};
+
 const getPending = (req, res) => {
     borrow.getPending((err, results) => {
         if (err) {
@@ -521,8 +666,13 @@ module.exports = {
     getAll,
     getById,
     getMyborrow,
+    getRequestBatches,
     getPending,
     getActive,
+    getRequestsByUser,
+    expirePendingBorrows,
+    approveBatch,
+    requestReturnByRequest,
     create,
     approve,
     reject,

@@ -39,6 +39,11 @@ router.get('/peminjaman/pending', verifyToken, isAdminOrPetugas, borrowControlle
 router.get('/peminjaman/active', verifyToken, isAdminOrPetugas, borrowController.getActive);
 router.get('/peminjaman/return-requests', verifyToken, isAdminOrPetugas, borrowController.getReturnRequests);
 router.get('/peminjaman', verifyToken, isAdminOrPetugas, borrowController.getAll);
+router.get('/peminjaman/requests', verifyToken, borrowController.getRequestsByUser);
+router.get('/peminjaman/batches', verifyToken, isAdminOrPetugas, borrowController.getRequestBatches);
+router.get('/peminjaman/expire-pending', verifyToken, isAdminOrPetugas, borrowController.expirePendingBorrows);
+router.put('/peminjaman/request/:requestId/approve', verifyToken, isAdminOrPetugas, borrowController.approveBatch);
+router.put('/peminjaman/request/:requestId/return', verifyToken, borrowController.requestReturnByRequest);
 router.get('/peminjaman/:id', verifyToken, borrowController.getById);
 router.post('/peminjaman', verifyToken, borrowController.create);
 router.put('/peminjaman/:id/approve', verifyToken, isAdminOrPetugas, borrowController.approve);

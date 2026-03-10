@@ -397,6 +397,76 @@ const getAll = (callback) => {
     db.query(query, callback);
 };
 
+const getRequestBatches = (callback) => {
+    const query = `
+        SELECT
+            br.id AS request_id,
+            br.id_user,
+            COALESCE(u.full_name, u.name) AS borrower,
+            br.status AS request_status,
+            br.notes AS request_notes,
+            br.submitted_at,
+            b.id AS borrow_id,
+            b.id_items,
+            i.item_name,
+            b.item_count,
+            b.return_date_expected,
+            b.status AS borrow_status
+        FROM borrow_requests br
+        LEFT JOIN user_data u ON br.id_user = u.id
+        LEFT JOIN borrow_data b ON b.request_id = br.id
+        LEFT JOIN items i ON b.id_items = i.id
+        ORDER BY br.submitted_at DESC, b.id ASC
+    `;
+
+    db.query(query, callback);
+};
+
+const approveBatch = (requestId, officerId, callback) => {
+    withTransaction((connection, done) => {
+        const selectQuery = `
+            SELECT id
+            FROM borrow_data
+            WHERE request_id = ? AND status = 'pending'
+            FOR UPDATE
+        `;
+
+        connection.query(selectQuery, [requestId], (selectErr, rows) => {
+            if (selectErr) {
+                return done(selectErr);
+            }
+
+            if (!rows || rows.length === 0) {
+                return done(createError('Tidak ada peminjaman pending pada batch ini', 'NO_PENDING_BATCH'));
+            }
+
+            const ids = rows.map((row) => row.id);
+            const updateQuery = `
+                UPDATE borrow_data
+                SET
+                    status = 'taken',
+                    id_officer_approval = ?,
+                    approval_date = NOW()
+                WHERE id IN (?)
+            `;
+
+            connection.query(updateQuery, [officerId, ids], (updateErr, updateRes) => {
+                if (updateErr) {
+                    return done(updateErr);
+                }
+
+                syncRequestStatusOnConnection(connection, requestId, (syncErr) => {
+                    if (syncErr) {
+                        return done(syncErr);
+                    }
+
+                    done(null, { requestId, affectedRows: updateRes.affectedRows });
+                });
+            });
+        });
+    }, callback);
+};
+
 const getById = (id, callback) => {
     const query = `
         SELECT
@@ -484,6 +554,48 @@ const getActive = (callback) => {
     db.query(query, callback);
 };
 
+const requestReturnByRequest = (requestId, userId, callback) => {
+    withTransaction((connection, done) => {
+        const selectTakenQuery = `
+            SELECT id
+            FROM borrow_data
+            WHERE request_id = ? AND id_user = ? AND status = 'taken'
+            FOR UPDATE
+        `;
+
+        connection.query(selectTakenQuery, [requestId, userId], (selectErr, rows) => {
+            if (selectErr) {
+                return done(selectErr);
+            }
+
+            if (!rows || rows.length === 0) {
+                return done(createError('Tidak ada item dalam batch yang berstatus taken untuk dikembalikan', 'NO_TAKEN_ITEMS'));
+            }
+
+            const ids = rows.map((r) => r.id);
+            const updateQuery = `
+                UPDATE borrow_data
+                SET status = 'waiting for return'
+                WHERE id IN (?)
+            `;
+
+            connection.query(updateQuery, [ids], (updateErr, result) => {
+                if (updateErr) {
+                    return done(updateErr);
+                }
+
+                syncRequestStatusOnConnection(connection, requestId, (syncErr) => {
+                    if (syncErr) {
+                        return done(syncErr);
+                    }
+
+                    done(null, { requestId, affectedRows: result.affectedRows });
+                });
+            });
+        });
+    }, callback);
+};
+
 const hasActiveByUser = (id_user, callback) => {
     const query = `
         SELECT COUNT(*) AS activeCount
@@ -525,6 +637,109 @@ const getReturnRequests = (callback) => {
     `;
 
     db.query(query, callback);
+};
+
+const getRequestsByUser = (id_user, callback) => {
+    const query = `
+        SELECT
+            br.id AS request_id,
+            br.status AS request_status,
+            br.notes AS request_notes,
+            br.submitted_at,
+            b.id AS borrow_id,
+            b.id_items,
+            i.item_name,
+            b.item_count,
+            b.return_date_expected,
+            b.status AS borrow_status
+        FROM borrow_requests br
+        LEFT JOIN borrow_data b ON b.request_id = br.id
+        LEFT JOIN items i ON b.id_items = i.id
+        WHERE br.id_user = ?
+        ORDER BY br.submitted_at DESC, b.id ASC
+    `;
+
+    db.query(query, [id_user], callback);
+};
+
+const expirePendingBorrows = (callback) => {
+    withTransaction((connection, done) => {
+        const selectQuery = `
+            SELECT id, request_id, id_items, item_count
+            FROM borrow_data
+            WHERE status = 'pending'
+              AND borrow_date < DATE_SUB(NOW(), INTERVAL 24 HOUR)
+            FOR UPDATE
+        `;
+
+        connection.query(selectQuery, (selectErr, rows) => {
+            if (selectErr) {
+                return done(selectErr);
+            }
+
+            if (!rows || rows.length === 0) {
+                return done(null, { expiredCount: 0 });
+            }
+
+            const requestIds = new Set();
+            const itemCounts = {};
+            const borrowIds = rows.map((r) => r.id);
+
+            rows.forEach((row) => {
+                requestIds.add(row.request_id);
+                const key = row.id_items;
+                itemCounts[key] = (itemCounts[key] || 0) + row.item_count;
+            });
+
+            const updateBorrowQuery = `
+                UPDATE borrow_data
+                SET status = 'cancelled', notes = CONCAT(IFNULL(notes, ''), '\nExpired after 24h pending pickup')
+                WHERE id IN (?)
+            `;
+
+            connection.query(updateBorrowQuery, [borrowIds], (updateErr) => {
+                if (updateErr) {
+                    return done(updateErr);
+                }
+
+                const keys = Object.keys(itemCounts);
+                let releaseIndex = 0;
+
+                const releaseNext = (releaseErr) => {
+                    if (releaseErr) {
+                        return done(releaseErr);
+                    }
+                    if (releaseIndex >= keys.length) {
+                        // Sync all affected request statuses
+                        const requestArray = Array.from(requestIds);
+                        let syncIndex = 0;
+
+                        const syncNext = (syncErr) => {
+                            if (syncErr) {
+                                return done(syncErr);
+                            }
+                            if (syncIndex >= requestArray.length) {
+                                return done(null, { expiredCount: rows.length });
+                            }
+
+                            const reqId = requestArray[syncIndex++];
+                            syncRequestStatusOnConnection(connection, reqId, syncNext);
+                        };
+
+                        return syncNext(null);
+                    }
+
+                    const itemId = keys[releaseIndex];
+                    const amount = itemCounts[itemId];
+                    releaseIndex += 1;
+
+                    releaseStockAndPromoteQueueOnConnection(connection, itemId, amount, releaseNext);
+                };
+
+                releaseNext(null);
+            });
+        });
+    }, callback);
 };
 
 const createBatch = (data, callback) => {
@@ -1101,6 +1316,11 @@ module.exports = {
     getPending,
     getActive,
     getReturnRequests,
+    getRequestBatches,
+    getRequestsByUser,
+    expirePendingBorrows,
+    requestReturnByRequest,
+    approveBatch,
     hasActiveByUser,
     hasActiveByItem,
     create,

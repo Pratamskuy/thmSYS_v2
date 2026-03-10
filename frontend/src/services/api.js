@@ -181,9 +181,14 @@ export const borrowAPI = {
   getAll: () => apiCall('/peminjaman'),
   getById: (id) => apiCall(`/peminjaman/${id}`),
   getMy: () => apiCall(`/peminjaman/my`),
+  getRequests: () => apiCall(`/peminjaman/requests`),
+  getBatches: () => apiCall('/peminjaman/batches'),
+  approveBatch: (requestId) => apiCall(`/peminjaman/request/${requestId}/approve`, { method: 'PUT' }),
+  requestReturnBatch: (requestId) => apiCall(`/peminjaman/request/${requestId}/return`, { method: 'PUT' }),
   getPending: () => apiCall('/peminjaman/pending'),
   getActive: () => apiCall('/peminjaman/active'),
   getReturnRequests: () => apiCall('/peminjaman/return-requests'),
+  expirePending: () => apiCall('/peminjaman/expire-pending'),
   createBatch: (borrowData, idempotencyKey) =>
     apiCall('/peminjaman', {
       method: 'POST',
