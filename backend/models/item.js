@@ -4,9 +4,30 @@ const getAll = (callback) => {
     const query = `
         SELECT 
             items.*,
-            categories.categories
+            categories.categories,
+            COALESCE(queue_stats.requested_not_approved, 0) AS requested_not_approved,
+            COALESCE(borrowed_stats.borrowed_approved, 0) AS borrowed_approved
         FROM items
         LEFT JOIN categories ON items.categories_id = categories.id
+        LEFT JOIN (
+            SELECT
+                id_items,
+                SUM(CASE WHEN status IN ('pending', 'queued') THEN item_count ELSE 0 END) AS requested_not_approved
+            FROM borrow_data
+            GROUP BY id_items
+        ) AS queue_stats ON queue_stats.id_items = items.id
+        LEFT JOIN (
+            SELECT
+                id_items,
+                SUM(
+                    CASE
+                        WHEN status IN ('taken', 'waiting for return', 'approved') THEN item_count
+                        ELSE 0
+                    END
+                ) AS borrowed_approved
+            FROM borrow_data
+            GROUP BY id_items
+        ) AS borrowed_stats ON borrowed_stats.id_items = items.id
         ORDER BY items.id DESC
     `;
     db.query(query, callback);

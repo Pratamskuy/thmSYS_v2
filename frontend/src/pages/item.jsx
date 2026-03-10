@@ -183,6 +183,7 @@ function Items() {
                   <th>Total</th>
                   <th>Tersedia</th>
                   <th>Dipinjam</th>
+                  <th>Dalam Antrian</th>
                   <th>Kondisi</th>
                   {isAdmin() && <th>Aksi</th>}
                 </tr>
@@ -199,7 +200,12 @@ function Items() {
                         {item.available}
                       </span>
                     </td>
-                    <td>{item.total - item.available}</td>
+                    <td>{Number(item.borrowed_approved) || 0}</td>
+                    <td>
+                      <span className={`badge ${Number(item.requested_not_approved) > 0 ? 'badge-queued' : 'badge-approved'}`}>
+                        {Number(item.requested_not_approved) || 0}
+                      </span>
+                    </td>
                     <td>
                       <span className={`badge badge-${item.item_condition === 'normal' ? 'approved' : 'warning'}`}>
                         {item.item_condition}
