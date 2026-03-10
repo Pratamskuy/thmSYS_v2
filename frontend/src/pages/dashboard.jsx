@@ -219,7 +219,17 @@ function Dashboard() {
                           </button>
                         </div>
                       )}
-                      {!isAdminOrPetugas() && borrow.status === 'pending' && (
+                      {isAdminOrPetugas() && borrow.status === 'queued' && (
+                        <div className="action-buttons">
+                          <button 
+                            className="btn btn-danger btn-sm" 
+                            onClick={() => handleReject(borrow.id)}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      )}
+                      {!isAdminOrPetugas() && (borrow.status === 'pending' || borrow.status === 'queued') && (
                         <button 
                           className="btn btn-warning btn-sm" 
                           onClick={() => handleCancel(borrow.id)}

@@ -184,9 +184,16 @@ export const borrowAPI = {
   getPending: () => apiCall('/peminjaman/pending'),
   getActive: () => apiCall('/peminjaman/active'),
   getReturnRequests: () => apiCall('/peminjaman/return-requests'),
-  create: (borrowData) =>
+  createBatch: (borrowData, idempotencyKey) =>
     apiCall('/peminjaman', {
       method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {},
+      body: JSON.stringify(borrowData),
+    }),
+  create: (borrowData, idempotencyKey) =>
+    apiCall('/peminjaman', {
+      method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {},
       body: JSON.stringify(borrowData),
     }),
   approve: (id) =>

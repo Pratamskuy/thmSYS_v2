@@ -1,27 +1,144 @@
 const borrow = require('../models/pinjam');
 const activityLog = require('../models/activityLog');
-const item = require('../models/item');
-const returnModel = require('../models/returnModel')
+const returnModel = require('../models/returnModel');
+
+const MAX_ITEMS_PER_REQUEST = 20;
+
+const logActivity = (payload) => {
+    activityLog.create(payload, () => {});
+};
+
+const mapBorrowError = (err, res, fallbackMessage) => {
+    if (!err) {
+        return res.status(500).json({
+            success: false,
+            message: fallbackMessage,
+        });
+    }
+
+    if (err.code === 'BORROW_NOT_FOUND') {
+        return res.status(404).json({
+            success: false,
+            message: err.message,
+        });
+    }
+
+    if (err.code === 'ITEM_NOT_FOUND') {
+        return res.status(404).json({
+            success: false,
+            message: err.message,
+        });
+    }
+
+    if (
+        err.code === 'INVALID_STATUS' ||
+        err.code === 'INSUFFICIENT_STOCK' ||
+        err.code === 'INVALID_ITEM_COUNT' ||
+        err.code === 'MAX_ITEMS_EXCEEDED' ||
+        err.code === 'IDEMPOTENCY_LOOKUP_FAILED'
+    ) {
+        return res.status(400).json({
+            success: false,
+            message: err.message,
+        });
+    }
+
+    if (err.code === 'IDEMPOTENCY_IN_PROGRESS') {
+        return res.status(409).json({
+            success: false,
+            message: err.message,
+        });
+    }
+
+    return res.status(500).json({
+        success: false,
+        message: fallbackMessage,
+        error: err.message,
+    });
+};
+
+const normalizeCreatePayload = (body) => {
+    if (Array.isArray(body.items) && body.items.length > 0) {
+        return body.items;
+    }
+
+    if (body.id_items) {
+        return [
+            {
+                id_items: body.id_items,
+                item_count: body.item_count,
+                return_date_expected: body.return_date_expected,
+                notes: body.notes,
+            },
+        ];
+    }
+
+    return [];
+};
+
+const validateItems = (items) => {
+    if (!Array.isArray(items) || items.length === 0) {
+        return { valid: false, message: 'Minimal satu item harus dipilih' };
+    }
+
+    if (items.length > MAX_ITEMS_PER_REQUEST) {
+        return {
+            valid: false,
+            message: `Maksimal ${MAX_ITEMS_PER_REQUEST} item per permintaan`,
+        };
+    }
+
+    const seen = new Set();
+
+    for (const entry of items) {
+        const id_items = Number.parseInt(entry.id_items, 10);
+        const item_count = Number.parseInt(entry.item_count, 10) || 1;
+        const return_date_expected = entry.return_date_expected;
+
+        if (!id_items || id_items < 1) {
+            return { valid: false, message: 'ID item tidak valid pada daftar item' };
+        }
+
+        if (!item_count || item_count < 1) {
+            return { valid: false, message: 'Jumlah item minimal 1 pada setiap item' };
+        }
+
+        if (!return_date_expected) {
+            return { valid: false, message: 'Tanggal kembali wajib diisi untuk semua item' };
+        }
+
+        const duplicateKey = `${id_items}|${return_date_expected}`;
+        if (seen.has(duplicateKey)) {
+            return {
+                valid: false,
+                message: 'Duplikasi item dengan tanggal kembali yang sama tidak diperbolehkan',
+            };
+        }
+
+        seen.add(duplicateKey);
+    }
+
+    return { valid: true };
+};
 
 const getAll = (req, res) => {
     borrow.getAll((err, results) => {
         if (err) {
             return res.status(500).json({
                 success: false,
-                message: "Gagal mengambil data peminjaman",
-                error: err.message
+                message: 'Gagal mengambil data peminjaman',
+                error: err.message,
             });
         }
+
         res.status(200).json({
             success: true,
-            message: "Berhasil mengambil data peminjaman",
-            data: results
+            message: 'Berhasil mengambil data peminjaman',
+            data: results,
         });
     });
 };
 
-// ===== GET PEMINJAMAN BY ID =====
-// Endpoint: GET /api/peminjaman/:id
 const getById = (req, res) => {
     const { id } = req.params;
 
@@ -29,33 +146,32 @@ const getById = (req, res) => {
         if (err) {
             return res.status(500).json({
                 success: false,
-                message: "Gagal mengambil data peminjaman",
-                error: err.message
+                message: 'Gagal mengambil data peminjaman',
+                error: err.message,
             });
         }
+
         if (results.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "borrow tidak ditemukan"
+                message: 'Peminjaman tidak ditemukan',
             });
         }
+
         res.status(200).json({
             success: true,
-            data: results[0]
+            data: results[0],
         });
     });
 };
 
-// ===== GET MY PEMINJAMAN =====
-// Endpoint: GET /api/peminjaman/my
-// Untuk peminjam melihat riwayat peminjamannya
 const getMyborrow = (req, res) => {
-    const id_user = req.user.id; 
+    const id_user = req.user.id;
 
     if (!id_user) {
         return res.status(401).json({
             success: false,
-            message: "User tidak terautentikasi"
+            message: 'User tidak terautentikasi',
         });
     }
 
@@ -63,412 +179,340 @@ const getMyborrow = (req, res) => {
         if (err) {
             return res.status(500).json({
                 success: false,
-                message: "Gagal mengambil data peminjaman",
-                error: err.message
+                message: 'Gagal mengambil data peminjaman',
+                error: err.message,
             });
         }
 
         res.status(200).json({
             success: true,
             total: results.length,
-            data: results
+            data: results,
         });
     });
 };
 
-
-// ===== GET PENDING PEMINJAMAN =====
-// Endpoint: GET /api/peminjaman/pending
-// Untuk petugas melihat peminjaman yang perlu diapprove
 const getPending = (req, res) => {
     borrow.getPending((err, results) => {
         if (err) {
             return res.status(500).json({
                 success: false,
-                message: "Gagal mengambil data peminjaman pending",
-                error: err.message
+                message: 'Gagal mengambil data peminjaman pending',
+                error: err.message,
             });
         }
+
         res.status(200).json({
             success: true,
-            data: results
+            data: results,
         });
     });
 };
 
-// ===== GET ACTIVE PEMINJAMAN =====
-// Endpoint: GET /api/peminjaman/active
-// Untuk melihat peminjaman yang sedang berjalan
 const getActive = (req, res) => {
     borrow.getActive((err, results) => {
         if (err) {
             return res.status(500).json({
                 success: false,
-                message: "Gagal mengambil data peminjaman aktif",
-                error: err.message
+                message: 'Gagal mengambil data peminjaman aktif',
+                error: err.message,
             });
         }
+
         res.status(200).json({
             success: true,
-            data: results
+            data: results,
         });
     });
 };
 
-// ===== CREATE PEMINJAMAN (AJUKAN PEMINJAMAN) =====
-// Endpoint: POST /api/peminjaman
 const create = (req, res) => {
-    const {
-        id_items,
-        item_count,
-        return_date_expected,
-        notes
-    } = req.body;
+    const items = normalizeCreatePayload(req.body);
+    const validation = validateItems(items);
 
-    const data = {
-        id_items: id_items,
-        item_count: item_count || 1,
-        return_date_expected: return_date_expected,
-        notes: notes || null,
-        id_user: req.user.id
-    };
-
-    // Validasi input
-    if (!data.id_items || !data.return_date_expected) {
+    if (!validation.valid) {
         return res.status(400).json({
             success: false,
-            message: "ID item dan tanggal kembali wajib diisi"
+            message: validation.message,
         });
     }
 
-    // Cek ketersediaan item
-    item.getById(data.id_items, (err, results) => {
-        if (err || results.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Item tidak ditemukan"
-            });
+    const idempotencyKey = req.headers['idempotency-key'] || req.body.idempotency_key || null;
+
+    const payload = {
+        id_user: req.user.id,
+        request_notes: req.body.request_notes || req.body.notes || null,
+        idempotency_key: idempotencyKey,
+        items,
+    };
+
+    borrow.createBatch(payload, (err, result) => {
+        if (err) {
+            return mapBorrowError(err, res, 'Gagal mengajukan peminjaman');
         }
 
-        const itemData = results[0];
+        logActivity({
+            id_user: req.user.id,
+            action: 'CREATE',
+            table_affected: 'borrow_requests',
+            id_data: result.requestId,
+            notes: `Pengajuan peminjaman ${result.reused ? 'idempotent-hit' : 'baru'}: request ${result.requestId}`,
+        });
 
-        if (itemData.jumlah_tersedia < data.item_count) {
-            return res.status(400).json({
-                success: false,
-                message: `Stok tidak cukup. Tersedia: ${itemData.jumlah_tersedia}`
-            });
+        const responseData = {
+            request_id: result.requestId,
+            item_ids: result.itemIds,
+            pending_item_ids: result.pendingItemIds || [],
+            queued_item_ids: result.queuedItemIds || [],
+            reused: result.reused,
+        };
+
+        if (result.itemIds.length === 1) {
+            responseData.id = result.itemIds[0];
         }
 
-        borrow.create(data, (err, results) => {
-            if (err) {
-                return res.status(500).json({
-                    success: false,
-                    message: "Gagal mengajukan peminjaman",
-                    error: err.message
-                });
-            }
+        const queuedCount = responseData.queued_item_ids.length;
+        const pendingCount = responseData.pending_item_ids.length;
+        let message = 'Berhasil mengajukan peminjaman. Stok sudah di-reserve dan menunggu persetujuan petugas.';
 
-            activityLog.create({
-                id_user: req.user.id,
-                aksi: 'CREATE',
-                tabel_terkait: 'peminjaman',
-                id_data: results.insertId,
-                keterangan: `Pengajuan peminjaman item: ${itemData.nama_item}`
-            }, () => { });
+        if (queuedCount > 0 && pendingCount > 0) {
+            message =
+                'Berhasil mengajukan peminjaman. Sebagian item di-reserve (pending) dan sebagian masuk antrean (queued).';
+        } else if (queuedCount > 0) {
+            message = 'Berhasil mengajukan peminjaman. Item masuk antrean (queued) karena stok belum mencukupi.';
+        }
 
-            res.status(201).json({
-                success: true,
-                message: "Berhasil mengajukan peminjaman. Menunggu persetujuan petugas.",
-                data: { id: results.insertId }
-            });
+        return res.status(result.reused ? 200 : 201).json({
+            success: true,
+            message: result.reused
+                ? 'Request yang sama sudah pernah diproses sebelumnya'
+                : message,
+            data: responseData,
         });
     });
 };
 
-// ===== APPROVE PEMINJAMAN =====
-// Endpoint: PUT /api/peminjaman/:id/approve
 const approve = (req, res) => {
     const { id } = req.params;
     const officer_id = req.user.id;
 
-    // Ambil data peminjaman dulu
-    borrow.getById(id, (err, results) => {
-        if (err || results.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "borrow tidak ditemukan"
-            });
+    borrow.approve(id, officer_id, (err, results) => {
+        if (err) {
+            return mapBorrowError(err, res, 'Gagal menyetujui peminjaman');
         }
 
-        const peminjaman = results[0];
-
-        if (peminjaman.status !== 'pending') {
+        if (results.affectedRows === 0) {
             return res.status(400).json({
                 success: false,
-                message: "borrow ini sudah diproses sebelumnya"
+                message: 'Peminjaman gagal diproses',
             });
         }
 
-          // Approve peminjaman (termasuk pengurangan stok di model)
-          borrow.approve(id, officer_id, (err, results) => {
-            if (err) {
-                return res.status(500).json({
-                    success: false,
-                    message: "Gagal menyetujui peminjaman",
-                    error: err.message
-                });
-            }
+        logActivity({
+            id_user: officer_id,
+            action: 'APPROVE',
+            table_affected: 'borrow_data',
+            id_data: Number(id),
+            notes: `Peminjaman item disetujui: ID ${id}`,
+        });
 
-            if (results.affectedRows === 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Gagal memperbarui stok item"
-                });
-            }
-            // Catat log aktivitas
-            activityLog.create({
-                id_user: officer_id,
-                aksi: 'APPROVE',
-                tabel_terkait: 'peminjaman',
-                id_data: id,
-                keterangan: `borrow disetujui: ID ${id}`
-            }, () => { });
-
-            res.status(200).json({
-                success: true,
-                message: "borrow berhasil disetujui"
-            });
+        return res.status(200).json({
+            success: true,
+            message: 'Peminjaman berhasil disetujui',
         });
     });
 };
 
-// ===== REJECT PEMINJAMAN =====
-// Endpoint: PUT /api/peminjaman/:id/reject
 const reject = (req, res) => {
     const { id } = req.params;
-    const { catatan } = req.body;
+    const notes = req.body.notes || req.body.catatan || null;
     const officer_id = req.user.id;
 
-    borrow.reject(id, officer_id, catatan, (err, results) => {
+    borrow.reject(id, officer_id, notes, (err, results) => {
         if (err) {
-            return res.status(500).json({
-                success: false,
-                message: "Gagal menolak peminjaman",
-                error: err.message
-            });
+            return mapBorrowError(err, res, 'Gagal menolak peminjaman');
         }
+
         if (results.affectedRows === 0) {
-            return res.status(404).json({
+            return res.status(400).json({
                 success: false,
-                message: "borrow tidak ditemukan atau sudah diproses"
+                message: 'Peminjaman gagal diproses',
             });
         }
 
-        // Catat log aktivitas
-        activityLog.create({
+        logActivity({
             id_user: officer_id,
-            aksi: 'REJECT',
-            tabel_terkait: 'peminjaman',
-            id_data: id,
-            keterangan: `borrow ditolak: ID ${id}`
-        }, () => { });
+            action: 'REJECT',
+            table_affected: 'borrow_data',
+            id_data: Number(id),
+            notes: `Peminjaman item ditolak: ID ${id}`,
+        });
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
-            message: "borrow berhasil ditolak"
+            message: 'Peminjaman berhasil ditolak',
         });
     });
 };
 
-// ===== GET RETURN REQUESTS =====
-// Endpoint: GET /api/peminjaman/return-requests
-// Untuk petugas melihat pengajuan pengembalian
 const getReturnRequests = (req, res) => {
-    borrow.getAll((err, results) => {
+    borrow.getReturnRequests((err, results) => {
         if (err) {
             return res.status(500).json({
                 success: false,
-                message: "Gagal mengambil data pengajuan pengembalian",
-                error: err.message
+                message: 'Gagal mengambil data pengajuan pengembalian',
+                error: err.message,
             });
         }
 
-        // Filter manual karena borrow.getAll ambil semua
-        // Alternatif: buat model function khusus biar lebih efisien
-        const returnRequests = results.filter(item => item.status === 'waiting for return   ');
-
         res.status(200).json({
             success: true,
-            data: returnRequests
+            data: results,
         });
     });
 };
 
-// Modifikasi deleteborrow agar tidak bisa hapus yang aktif
 const deleteborrow = (req, res) => {
     const { id } = req.params;
 
     borrow.deleteById(id, (err, results) => {
         if (err) {
-            return res.status(500).json({
-                success: false,
-                message: "Gagal menghapus peminjaman",
-                error: err.message
-            });
+            return mapBorrowError(err, res, 'Gagal menghapus peminjaman');
         }
+
         if (results.affectedRows === 0) {
             return res.status(404).json({
                 success: false,
-                message: "borrow tidak ditemukan"
+                message: 'Peminjaman tidak ditemukan',
             });
         }
 
-        // Catat log aktivitas
-        activityLog.create({
+        logActivity({
             id_user: req.user.id,
-            aksi: 'DELETE',
-            tabel_terkait: 'peminjaman',
-            id_data: id,
-            keterangan: `borrow dihapus: ID ${id}`
-        }, () => { });
+            action: 'DELETE',
+            table_affected: 'borrow_data',
+            id_data: Number(id),
+            notes: `Peminjaman dihapus: ID ${id}`,
+        });
 
         res.status(200).json({
             success: true,
-            message: "Berhasil menghapus peminjaman"
+            message: 'Berhasil menghapus peminjaman',
         });
     });
 };
 
-// ===== REQUEST RETURN (AJUKAN PENGEMBALIAN) =====
-// PUT /api/peminjaman/:id/request-return
 const requestReturn = (req, res) => {
     const borrow_id = req.params.id;
     const id_user = req.user.id;
-  
-    // 1. Ambil data peminjaman
+
     borrow.getById(borrow_id, (err, results) => {
-      if (err) {
-        console.error(err);
-        return res.status(500).json({
-          success: false,
-          message: 'Server error'
-        });
-      }
-  
-      if (results.length === 0) {
-        return res.status(404).json({
-          success: false,
-          message: 'Peminjaman tidak ditemukan'
-        });
-      }
-  
-      const peminjaman = results[0];
-  
-      // 2. Validasi pemilik
-      if (peminjaman.id_user !== id_user) {
-        return res.status(403).json({
-          success: false,
-          message: 'Bukan pemilik peminjaman'
-        });
-      }
-  
-      // 3. Validasi status
-      if (peminjaman.status !== 'taken') {
-        return res.status(400).json({
-          success: false,
-          message: 'Status peminjaman tidak valid untuk request return'
-        });
-      }
-  
-      // 4. Cek apakah sudah pernah request return
-      returnModel.findByBorrowId(borrow_id, (err, existingReturn) => {
         if (err) {
-          console.error(err);
-          return res.status(500).json({
-            success: false,
-            message: 'Server error'
-          });
-        }
-  
-        if (existingReturn.length > 0) {
-          return res.status(400).json({
-            success: false,
-            message: 'Request pengembalian sudah diajukan'
-          });
-        }
-  
-        // 5. Insert ke return_data
-        returnModel.create(
-          {
-            borrow_id
-          },
-          (err) => {
-            if (err) {
-              console.error(err);
-              return res.status(500).json({
+            return res.status(500).json({
                 success: false,
-                message: 'Gagal membuat request pengembalian'
-              });
-            }
-  
-            // 6. Update status peminjaman
-            borrow.updateStatus(
-              borrow_id,
-              'waiting for return', // pastikan status ini valid
-              (err) => {
-                if (err) {
-                  console.error(err);
-                  return res.status(500).json({
+                message: 'Server error',
+            });
+        }
+
+        if (results.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Peminjaman tidak ditemukan',
+            });
+        }
+
+        const peminjaman = results[0];
+
+        if (Number(peminjaman.id_user) !== Number(id_user)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Bukan pemilik peminjaman',
+            });
+        }
+
+        if (peminjaman.status !== 'taken') {
+            return res.status(400).json({
+                success: false,
+                message: 'Status peminjaman tidak valid untuk request return',
+            });
+        }
+
+        returnModel.findByBorrowId(borrow_id, (returnErr, existingReturn) => {
+            if (returnErr) {
+                return res.status(500).json({
                     success: false,
-                    message: 'Gagal update status peminjaman'
-                  });
-                }
-  
-                return res.status(200).json({
-                  success: true,
-                  message: 'Request pengembalian berhasil diajukan'
+                    message: 'Server error',
                 });
-              }
-            );
-          }
-        );
-      });
+            }
+
+            if (existingReturn.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Request pengembalian sudah diajukan',
+                });
+            }
+
+            returnModel.create({ borrow_id }, (createErr) => {
+                if (createErr) {
+                    return res.status(500).json({
+                        success: false,
+                        message: 'Gagal membuat request pengembalian',
+                    });
+                }
+
+                borrow.updateStatus(borrow_id, 'waiting for return', (statusErr) => {
+                    if (statusErr) {
+                        return res.status(500).json({
+                            success: false,
+                            message: 'Gagal update status peminjaman',
+                        });
+                    }
+
+                    logActivity({
+                        id_user,
+                        action: 'REQUEST_RETURN',
+                        table_affected: 'borrow_data',
+                        id_data: Number(borrow_id),
+                        notes: `Request pengembalian diajukan: ID ${borrow_id}`,
+                    });
+
+                    return res.status(200).json({
+                        success: true,
+                        message: 'Request pengembalian berhasil diajukan',
+                    });
+                });
+            });
+        });
     });
-  };
-  
-// ===== CANCEL PEMINJAMAN =====
-// Endpoint: PUT /api/peminjaman/:id/cancel
+};
+
 const cancel = (req, res) => {
     const { id } = req.params;
     const user_id = req.user.id;
 
     borrow.cancel(id, user_id, (err, results) => {
         if (err) {
-            return res.status(500).json({
-                success: false,
-                message: "Gagal membatalkan peminjaman",
-                error: err.message
-            });
+            return mapBorrowError(err, res, 'Gagal membatalkan peminjaman');
         }
+
         if (results.affectedRows === 0) {
             return res.status(404).json({
                 success: false,
-                message: "Peminjaman tidak ditemukan atau tidak dapat dibatalkan"
+                message: 'Peminjaman tidak ditemukan atau tidak dapat dibatalkan',
             });
         }
 
-        // Catat log aktivitas
-        activityLog.create({
+        logActivity({
             id_user: user_id,
-            aksi: 'CANCEL',
-            tabel_terkait: 'peminjaman',
-            id_data: id,
-            keterangan: `Peminjaman dibatalkan: ID ${id}`
-        }, () => { });
+            action: 'CANCEL',
+            table_affected: 'borrow_data',
+            id_data: Number(id),
+            notes: `Peminjaman dibatalkan: ID ${id}`,
+        });
 
         res.status(200).json({
             success: true,
-            message: "Peminjaman berhasil dibatalkan"
+            message: 'Peminjaman berhasil dibatalkan',
         });
     });
 };
@@ -485,5 +529,5 @@ module.exports = {
     cancel,
     deleteborrow,
     requestReturn,
-    getReturnRequests
+    getReturnRequests,
 };

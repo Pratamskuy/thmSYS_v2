@@ -62,6 +62,14 @@ function Borrows() {
     }
   };
 
+  const generateIdempotencyKey = () => {
+    if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
+      return globalThis.crypto.randomUUID();
+    }
+
+    return `borrow-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -82,20 +90,25 @@ function Borrows() {
       return;
     }
     try {
-      await Promise.all(
-        selectedItems.map((selectedItem) =>
-          borrowAPI.create({
-            id_items: selectedItem.id,
-            item_count: Number(selectedItem.item_count) || 1,
-            return_date_expected: selectedItem.return_date_expected,
-            notes: selectedItem.notes,
-          })
-        )
-      );
+      const idempotencyKey = generateIdempotencyKey();
+      const payload = {
+        items: selectedItems.map((selectedItem) => ({
+          id_items: selectedItem.id,
+          item_count: Number(selectedItem.item_count) || 1,
+          return_date_expected: selectedItem.return_date_expected,
+          notes: selectedItem.notes,
+        })),
+      };
+
+      const response = await borrowAPI.createBatch(payload, idempotencyKey);
       loadBorrows();
       loadAvailableItems();
       closeModal();
-      alert(`${selectedItems.length} borrow request sent sucessfully!`);
+      const requestId = response?.data?.request_id;
+      alert(
+        response?.message ||
+          `Borrow request submitted successfully${requestId ? ` (Request #${requestId})` : ''}!`
+      );
     } catch (error) {
       alert(error.message);
     }
@@ -130,6 +143,18 @@ function Borrows() {
         await borrowAPI.requestReturn(id);
         loadBorrows();
         alert('Return request submitted!');
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+  };
+
+  const handleCancel = async (id) => {
+    if (window.confirm('Cancel this borrow request?')) {
+      try {
+        await borrowAPI.cancel(id);
+        loadBorrows();
+        alert('Borrow request cancelled!');
       } catch (error) {
         alert(error.message);
       }
@@ -345,7 +370,15 @@ function Borrows() {
                             </button>
                           </>
                         )}
-                                {isAdminOrPetugas() && borrow.status === 'waiting for return' && (
+                        {isAdminOrPetugas() && borrow.status === 'queued' && (
+                          <button
+                            className="btn btn-sm btn-danger"
+                            onClick={() => handleReject(borrow.id)}
+                          >
+                            Reject
+                          </button>
+                        )}
+                        {isAdminOrPetugas() && borrow.status === 'waiting for return' && (
                           <button
                             className="btn btn-sm btn-primary"
                             onClick={() => handleConfirmReturn(borrow.id)}
@@ -361,6 +394,15 @@ function Borrows() {
                             Request Return
                           </button>
                         )}
+                        {!isAdminOrPetugas() &&
+                          (borrow.status === 'pending' || borrow.status === 'queued') && (
+                            <button
+                              className="btn btn-sm btn-danger"
+                              onClick={() => handleCancel(borrow.id)}
+                            >
+                              Cancel
+                            </button>
+                          )}
                       </div>
                     </td>
                   </tr>

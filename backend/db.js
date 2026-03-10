@@ -1,119 +1,232 @@
-//FILE DATABASE UNTUK WEB PEMINJAMAN ALAT FOTOGRAFI DAN DOKUMENTASI
+const mysql = require('mysql2');
 
-const mysql = require('mysql2')
+const DATABASE_NAME = 'db_peminjaman';
 
-//creating connection pool to database
-const db = mysql.createConnection({
+const db = mysql.createPool({
     host: 'localhost',
     user: 'root',
     password: '',
-    database: 'db_peminjaman',
+    database: DATABASE_NAME,
     waitForConnections: true,
     connectionLimit: 10,
-    queueLimit: 0, 
+    queueLimit: 0,
 });
 
-//initialization function to database and table
-const initDatabase = () => {
-    const tempConnection = mysql.createConnection({
-        host: 'localhost',
-        user: 'root',
-        password: ''
-    });
+const runQueriesSequentially = (connection, queries, callback) => {
+    let index = 0;
 
-    tempConnection.connect((err) => {
+    const next = (err) => {
         if (err) {
-            console.log('koneksi gagal:', err.message);
-        return;
+            return callback(err);
         }
-         console.log('koneksi sukses');
-         //membuat database jika belum ada
-        tempConnection.query(`CREATE DATABASE IF NOT EXISTS db_peminjaman`, (err) => {
-            if (err) {
-                console.error('gagal membuat database', err.message);
-            return;
-            }
-            console.log('sukses membuat database');
-            
-            //gunakan database
-            tempConnection.query('USE db_peminjaman', (err) => {
-            if (err) throw err;
 
-            createAllTables(tempConnection)
-            })
-        })  
-    })
-}
+        if (index >= queries.length) {
+            return callback(null);
+        }
 
-//fungsi create all table
-const createAllTables = (connection) =>{
+        const query = queries[index];
+        index += 1;
+        connection.query(query, next);
+    };
 
-    //Tabel user role, untuk mendefinisikan role user
-    const createUserrRole = `CREATE TABLE IF NOT EXISTS user_role (
+    next();
+};
+
+const runTasksSequentially = (tasks, callback) => {
+    let index = 0;
+
+    const next = (err) => {
+        if (err) {
+            return callback(err);
+        }
+
+        if (index >= tasks.length) {
+            return callback(null);
+        }
+
+        const task = tasks[index];
+        index += 1;
+        task(next);
+    };
+
+    next();
+};
+
+const ensureColumn = (connection, tableName, columnName, definition, callback) => {
+    const checkQuery = `SHOW COLUMNS FROM ${tableName} LIKE ?`;
+    connection.query(checkQuery, [columnName], (err, rows) => {
+        if (err) {
+            return callback(err);
+        }
+
+        if (rows.length > 0) {
+            return callback(null);
+        }
+
+        const alterQuery = `ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`;
+        connection.query(alterQuery, callback);
+    });
+};
+
+const ensureEnumDefinition = (connection, tableName, columnName, enumValues, defaultValue, callback) => {
+    const checkQuery = `SHOW COLUMNS FROM ${tableName} LIKE ?`;
+    connection.query(checkQuery, [columnName], (err, rows) => {
+        if (err) {
+            return callback(err);
+        }
+
+        if (rows.length === 0) {
+            return callback(new Error(`Kolom ${tableName}.${columnName} tidak ditemukan`));
+        }
+
+        const currentType = String(rows[0].Type || '');
+        const currentDefault = String(rows[0].Default || '');
+        const hasAllValues = enumValues.every((value) => currentType.includes(`'${value}'`));
+
+        if (hasAllValues && currentDefault === defaultValue) {
+            return callback(null);
+        }
+
+        const escapedValues = enumValues.map((value) => `'${String(value).replace(/'/g, "''")}'`).join(', ');
+        const alterQuery = `
+            ALTER TABLE ${tableName}
+            MODIFY COLUMN ${columnName} ENUM(${escapedValues}) DEFAULT '${defaultValue}'
+        `;
+        connection.query(alterQuery, callback);
+    });
+};
+
+const ensureIndex = (connection, tableName, indexName, indexColumns, callback) => {
+    const checkQuery = `SHOW INDEX FROM ${tableName} WHERE Key_name = ?`;
+    connection.query(checkQuery, [indexName], (err, rows) => {
+        if (err) {
+            return callback(err);
+        }
+
+        if (rows.length > 0) {
+            return callback(null);
+        }
+
+        const createIndexQuery = `ALTER TABLE ${tableName} ADD INDEX ${indexName} ${indexColumns}`;
+        connection.query(createIndexQuery, callback);
+    });
+};
+
+const insertDefaultRoles = (connection, callback) => {
+    const checkRoles = `SELECT COUNT(*) as count FROM user_role`;
+    connection.query(checkRoles, (err, results) => {
+        if (err) {
+            return callback(err);
+        }
+
+        if (results[0].count > 0) {
+            return callback(null);
+        }
+
+        const insertRoles = `
+            INSERT INTO user_role (id, role) VALUES
+            (1, 'admin'),
+            (2, 'petugas'),
+            (3, 'peminjam')
+        `;
+        connection.query(insertRoles, callback);
+    });
+};
+
+const createAllTables = (connection, callback) => {
+    const createUserRoleTable = `CREATE TABLE IF NOT EXISTS user_role (
         id INT AUTO_INCREMENT PRIMARY KEY,
         role VARCHAR(50) NOT NULL UNIQUE
     )`;
 
-    //Tabel user menyimpan data user
-    const createUserData = `CREATE TABLE IF NOT EXISTS user_data(
+    const createUserDataTable = `CREATE TABLE IF NOT EXISTS user_data (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR (255) NOT NULL,
-        email VARCHAR (100) UNIQUE NOT NULL,
-        password VARCHAR (255) NOT NULL,
-        full_name VARCHAR (255),
-        address VARCHAR (255),
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(100) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        full_name VARCHAR(255),
+        address VARCHAR(255),
         role_id INT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (role_id) REFERENCES user_role(id) ON DELETE SET NULL
     )`;
 
-    //tabel kategori menyimpan data kategori(kamera, lensa, tripod, baterai, memori)
-    const createCategoriesTable = `CREATE TABLE IF NOT EXISTS categories(
-        id INT AUTO_INCREMENT PRIMARY key,
-        categories VARCHAR (255) NOT NULL,
+    const createCategoriesTable = `CREATE TABLE IF NOT EXISTS categories (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        categories VARCHAR(255) NOT NULL,
         description TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`;
 
-    //tabel items, menyimpan data item
-    const createItemTable = `CREATE TABLE IF NOT EXISTS items(
+    const createItemsTable = `CREATE TABLE IF NOT EXISTS items (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        item_name VARCHAR (255) NOT NULL,
+        item_name VARCHAR(255) NOT NULL,
         description TEXT,
         total INT NOT NULL DEFAULT 0,
         available INT NOT NULL DEFAULT 0,
         categories_id INT,
-        item_condition ENUM ('normal', 'ok', 'not good', 'broken'),
+        item_condition ENUM('normal', 'ok', 'not good', 'broken') DEFAULT 'normal',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (categories_id) REFERENCES categories(id) ON DELETE SET NULL
     )`;
 
-    //tabel data pinjam, ben ruh sopo nyileh opo, ben ra ilang
-    const createBorrowTable = `CREATE TABLE IF NOT EXISTS borrow_data (
+    const createBorrowRequestsTable = `CREATE TABLE IF NOT EXISTS borrow_requests (
         id INT AUTO_INCREMENT PRIMARY KEY,
+        id_user INT NOT NULL,
+        status ENUM(
+            'submitted',
+            'queued',
+            'processing',
+            'approved',
+            'partially_approved',
+            'rejected',
+            'cancelled',
+            'completed'
+        ) DEFAULT 'submitted',
+        notes TEXT,
+        submitted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_borrow_requests_user_status (id_user, status),
+        FOREIGN KEY (id_user) REFERENCES user_data(id) ON DELETE CASCADE
+    )`;
+
+    const createBorrowDataTable = `CREATE TABLE IF NOT EXISTS borrow_data (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        request_id INT NULL,
         id_user INT NOT NULL,
         id_items INT NOT NULL,
         item_count INT NOT NULL DEFAULT 1,
         borrow_date DATETIME DEFAULT CURRENT_TIMESTAMP,
         return_date_expected DATETIME NOT NULL,
-        status ENUM ('available', 'approved','rejected', 'waiting for return', 'pending', 'taken', 'cancelled') DEFAULT 'pending',
+        status ENUM(
+            'available',
+            'approved',
+            'rejected',
+            'waiting for return',
+            'pending',
+            'queued',
+            'taken',
+            'cancelled'
+        ) DEFAULT 'pending',
         id_officer_approval INT,
         approval_date DATETIME,
         notes TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_borrow_data_item_queue (id_items, status, borrow_date, id),
+        INDEX idx_borrow_data_request_status (request_id, status),
+        FOREIGN KEY (request_id) REFERENCES borrow_requests(id) ON DELETE SET NULL,
         FOREIGN KEY (id_user) REFERENCES user_data(id),
         FOREIGN KEY (id_items) REFERENCES items(id),
-        FOREIGN KEY (id_officer_approval) REFERENCES user_data(id)
-
+        FOREIGN KEY (id_officer_approval) REFERENCES user_data(id) ON DELETE SET NULL
     )`;
 
-    //tabel penngembalian anjay mabar mbuh tulisi opo pekhhh
-    const createReturnTable = `CREATE TABLE IF NOT EXISTS return_data (
+    const createReturnDataTable = `CREATE TABLE IF NOT EXISTS return_data (
         id INT AUTO_INCREMENT PRIMARY KEY,
         borrow_id INT NOT NULL UNIQUE,
         officer_id INT,
         return_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-        item_condition ENUM ('normal', 'ok', 'not good', 'broken'),
+        item_condition ENUM('normal', 'ok', 'not good', 'broken') DEFAULT 'normal',
         late INT DEFAULT 0,
         fine DECIMAL(10, 2) DEFAULT 0,
         notes TEXT,
@@ -122,97 +235,133 @@ const createAllTables = (connection) =>{
         FOREIGN KEY (officer_id) REFERENCES user_data(id)
     )`;
 
-    //alat penyimpan log aktivitas ajaib
-    const createLogTable = `CREATE TABLE IF NOT EXISTS log(
+    const createLogTable = `CREATE TABLE IF NOT EXISTS log (
         id INT AUTO_INCREMENT PRIMARY KEY,
-            id_user INT,
-            action VARCHAR(255) NOT NULL,
-            table_affected VARCHAR(100),
-            id_data INT,
-            notes TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (id_user) REFERENCES user_data(id) ON DELETE SET NULL
+        id_user INT,
+        action VARCHAR(255) NOT NULL,
+        table_affected VARCHAR(100),
+        id_data INT,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (id_user) REFERENCES user_data(id) ON DELETE SET NULL
     )`;
 
-    //test
-    connection.query(createUserrRole, (err) => {
-        if (err) {
-            console.error('error creating table "user_roles"', err.message);
-        } else {
-            console.log('table user_roles oke');
-        }
-    })
-    connection.query(createUserData, (err) => {
-        if (err) {
-            console.error('error creating table "user_data"', err.message);
-        } else {
-            console.log('table user_data oke');
-        }
-    })
-    connection.query(createCategoriesTable, (err) => {
-        if (err) {
-            console.error('error creating table "categories"', err.message);
-        } else {
-            console.log('table categories oke');
-        }
-    })
-    connection.query(createItemTable, (err) => {
-        if (err) {
-            console.error('error creating table "items"', err.message);
-        } else {
-            console.log('table items oke');
-        }
-    })
-    connection.query(createBorrowTable, (err) => {
-        if (err) {
-            console.error('error creating table "borrow_data"', err.message);
-        } else {
-            console.log('table Borrow_data oke');
-        }
-    })
-    connection.query(createReturnTable, (err) => {
-        if (err) {
-            console.error('error creating table "return_data"', err.message);
-        } else {
-            console.log('table return_data oke');
-        }
-    })
-    connection.query(createLogTable, (err) => {
-        if (err) {
-            console.error('error creating table "log"', err.message);
-        } else {
-            console.log('table log oke');
-        }
-    })
-}
+    const createBorrowIdempotencyTable = `CREATE TABLE IF NOT EXISTS borrow_submit_idempotency (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        id_user INT NOT NULL,
+        idempotency_key VARCHAR(128) NOT NULL,
+        request_id INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_borrow_submit_idempotency (id_user, idempotency_key),
+        FOREIGN KEY (id_user) REFERENCES user_data(id) ON DELETE CASCADE,
+        FOREIGN KEY (request_id) REFERENCES borrow_requests(id) ON DELETE SET NULL
+    )`;
 
-//fungsi insert role default
-const insertDefaultRoles = (connection) => {
-    const checkRoles = `SELECT COUNT(*) as count FROM user_roles`
-    connection.query(checkRoles, (err, results) => {
+    const tableQueries = [
+        createUserRoleTable,
+        createUserDataTable,
+        createCategoriesTable,
+        createItemsTable,
+        createBorrowRequestsTable,
+        createBorrowDataTable,
+        createReturnDataTable,
+        createLogTable,
+        createBorrowIdempotencyTable,
+    ];
+
+    runQueriesSequentially(connection, tableQueries, (err) => {
         if (err) {
-            console.error('error checking roles', err.message);
-            return;
-    }})
+            return callback(err);
+        }
 
-    //roles default
-    if (results[0].count === 0) {
-        const insertRoles = `
-            INSERT INTO user_role (id, role) VALUES 
-            (1, 'admin'),
-            (2, 'petugas'),
-            (3, 'peminjam')
-        `;
-        connection.query(insertRoles, (err) => {
-            if (err) console.error("Error insert roles:", err.message);
-            else console.log("3. Default roles berhasil ditambahkan");
+        const migrationTasks = [
+            (next) => ensureColumn(connection, 'borrow_data', 'request_id', 'INT NULL', next),
+            (next) =>
+                ensureEnumDefinition(
+                    connection,
+                    'borrow_data',
+                    'status',
+                    [
+                        'available',
+                        'approved',
+                        'rejected',
+                        'waiting for return',
+                        'pending',
+                        'queued',
+                        'taken',
+                        'cancelled',
+                    ],
+                    'pending',
+                    next
+                ),
+            (next) =>
+                ensureEnumDefinition(
+                    connection,
+                    'borrow_requests',
+                    'status',
+                    [
+                        'submitted',
+                        'queued',
+                        'processing',
+                        'approved',
+                        'partially_approved',
+                        'rejected',
+                        'cancelled',
+                        'completed',
+                    ],
+                    'submitted',
+                    next
+                ),
+            (next) => ensureIndex(connection, 'borrow_data', 'idx_borrow_data_item_queue', '(id_items, status, borrow_date, id)', next),
+            (next) => ensureIndex(connection, 'borrow_data', 'idx_borrow_data_request_status', '(request_id, status)', next),
+            (next) => ensureIndex(connection, 'borrow_requests', 'idx_borrow_requests_user_status', '(id_user, status)', next),
+            (next) => insertDefaultRoles(connection, next),
+        ];
 
-            connection.end(); // Tutup koneksi sedelo
-        });
-    } else {
-        console.log("3. Roles sudah ada");
-        connection.end();
+        runTasksSequentially(migrationTasks, callback);
+    });
 };
-}
+
+const initDatabase = () => {
+    const tempConnection = mysql.createConnection({
+        host: 'localhost',
+        user: 'root',
+        password: '',
+    });
+
+    tempConnection.connect((err) => {
+        if (err) {
+            console.error('Koneksi MySQL gagal:', err.message);
+            return;
+        }
+
+        tempConnection.query(`CREATE DATABASE IF NOT EXISTS ${DATABASE_NAME}`, (createDbErr) => {
+            if (createDbErr) {
+                console.error('Gagal membuat database:', createDbErr.message);
+                tempConnection.end();
+                return;
+            }
+
+            tempConnection.query(`USE ${DATABASE_NAME}`, (useDbErr) => {
+                if (useDbErr) {
+                    console.error('Gagal memilih database:', useDbErr.message);
+                    tempConnection.end();
+                    return;
+                }
+
+                createAllTables(tempConnection, (tableErr) => {
+                    if (tableErr) {
+                        console.error('Gagal inisialisasi tabel:', tableErr.message);
+                    } else {
+                        console.log('Database siap digunakan.');
+                    }
+
+                    tempConnection.end();
+                });
+            });
+        });
+    });
+};
+
 module.exports = db;
 module.exports.initDatabase = initDatabase;

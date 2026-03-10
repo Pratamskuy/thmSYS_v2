@@ -117,6 +117,11 @@ const create = (req, res) => {
             // Kembalikan jumlah tersedia alat
             item.updateJumlahTersedia(borrow_data.id_items, borrow_data.item_count, 'tambah', (err) => {
                 if (err) console.error("Gagal update jumlah alat:", err);
+                borrow.processQueuedByItem(borrow_data.id_items, (queueErr) => {
+                    if (queueErr) {
+                        console.error("Gagal memproses antrean peminjaman:", queueErr);
+                    }
+                });
             });
 
             // Hitung denda untuk response (dengan kondisi)
@@ -224,31 +229,37 @@ const confirmReturn = (req, res) => {
                             });
                         }
 
-                        borrow.updateStatus(borrowId, 'available', (err) => {
-                            if (err) {
-                                return res.status(500).json({
-                                    success: false,
-                                    message: 'Gagal memperbarui status peminjaman',
-                                    error: err.message
-                                });
+                        borrow.processQueuedByItem(peminjaman.id_items, (queueErr) => {
+                            if (queueErr) {
+                                console.error('Gagal memproses antrean peminjaman:', queueErr);
                             }
 
-                            activityLog.create({
-                                id_user: officer_id,
-                                aksi: 'CONFIRM_RETURN',
-                                tabel_terkait: 'peminjaman',
-                                id_data: borrowId,
-                                 keterangan: `Pengembalian dikonfirmasi: ID ${borrowId}. Denda: Rp ${denda}`
-                            }, () => { });
-
-                            return res.status(200).json({
-                                success: true,
-                                message: 'Pengembalian berhasil dikonfirmasi',
-                                data: {
-                                    late,
-                                    denda,
-                                    denda_formatted: `Rp ${denda.toLocaleString('id-ID')}`
+                            borrow.updateStatus(borrowId, 'available', (err) => {
+                                if (err) {
+                                    return res.status(500).json({
+                                        success: false,
+                                        message: 'Gagal memperbarui status peminjaman',
+                                        error: err.message
+                                    });
                                 }
+
+                                activityLog.create({
+                                    id_user: officer_id,
+                                    aksi: 'CONFIRM_RETURN',
+                                    tabel_terkait: 'peminjaman',
+                                    id_data: borrowId,
+                                    keterangan: `Pengembalian dikonfirmasi: ID ${borrowId}. Denda: Rp ${denda}`
+                                }, () => { });
+
+                                return res.status(200).json({
+                                    success: true,
+                                    message: 'Pengembalian berhasil dikonfirmasi',
+                                    data: {
+                                        late,
+                                        denda,
+                                        denda_formatted: `Rp ${denda.toLocaleString('id-ID')}`
+                                    }
+                                });
                             });
                         });
                     }
