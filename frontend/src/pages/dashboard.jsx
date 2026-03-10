@@ -8,6 +8,7 @@ function Dashboard() {
     totalItems: 0,
     availableItems: 0,
     pendingBorrows: 0,
+    queuedBorrows: 0,
     activeBorrows: 0,
     myBorrows: 0,
     totalUsers: 0,
@@ -39,9 +40,12 @@ function Dashboard() {
         ]);
         
         borrowData = allBorrowsRes;
+        const queuedCount = borrowData.data?.filter((b) => b.status === 'queued').length || 0;
+
         setStats(prev => ({
           ...prev,
           pendingBorrows: pendingRes.data?.length || 0,
+          queuedBorrows: queuedCount,
           activeBorrows: activeRes.data?.length || 0,
         }));
         
@@ -141,6 +145,11 @@ function Dashboard() {
             <div className="stat-card warning">
               <h3>{stats.pendingBorrows}</h3>
               <p>Pending Requests</p>
+            </div>
+
+            <div className="stat-card info">
+              <h3>{stats.queuedBorrows}</h3>
+              <p>Queued Borrows</p>
             </div>
             
             <div className="stat-card">
