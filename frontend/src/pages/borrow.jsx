@@ -44,11 +44,11 @@ function Borrows() {
 
         const batchRes = await borrowAPI.getBatches();
         setBorrows(res.data || []);
-        setAdminBatches(batchRes.data || []);
+        setAdminBatches(sortBatchesByDate(batchRes.data || []));
       } else {
         const [myRes, requestRes] = await Promise.all([borrowAPI.getMy(), borrowAPI.getRequests()]);
         setBorrows(myRes.data || []);
-        setBatchRequests(requestRes.data || []);
+        setBatchRequests(sortBatchesByDate(requestRes.data || []));
       }
     } catch (error) {
       console.error('Failed to load borrows:', error);
@@ -159,12 +159,20 @@ function Borrows() {
       setIsPrintReady(false);
       setIsPrinting(true);
       const batchRes = await borrowAPI.getBatches();
-      setAdminBatches(batchRes.data || []);
+      setAdminBatches(sortBatchesByDate(batchRes.data || []));
       setIsPrintReady(true);
     } catch (error) {
       setIsPrinting(false);
       alert(error.message);
     }
+  };
+
+  const sortBatchesByDate = (batches) => {
+    return [...batches].sort((a, b) => {
+      const timeA = new Date(a.submitted_at || 0).getTime();
+      const timeB = new Date(b.submitted_at || 0).getTime();
+      return timeB - timeA;
+    });
   };
 
   if (loading) {
