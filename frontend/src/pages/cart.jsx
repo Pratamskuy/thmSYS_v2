@@ -189,7 +189,7 @@ function Cart() {
                 return (
                   <div className="cart-item" key={entry.id}>
                     <div className="cart-item-info">
-                      <h3>{entry.item_name}</h3>
+                      <h3 className="text-clamp-1">{entry.item_name}</h3>
                       <p className="cart-item-meta">
                         Available: {entry.available}
                         {outOfStock && <span className="cart-item-warning"> Out of stock</span>}

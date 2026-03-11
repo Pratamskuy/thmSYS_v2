@@ -73,6 +73,8 @@ const determineRequestStatus = (stats) => {
     const returned = Number(stats.returned_count) || 0;
     const rejected = Number(stats.rejected_count) || 0;
     const cancelled = Number(stats.cancelled_count) || 0;
+    const activeCount = pending + queued + taken + waitingReturn;
+    const finishedCount = returned + rejected + cancelled;
 
     if (total === 0) {
         return 'cancelled';
@@ -90,24 +92,19 @@ const determineRequestStatus = (stats) => {
         return pending === total ? 'submitted' : 'processing';
     }
 
-    if (returned === total) {
+    if (activeCount === 0 && finishedCount === total) {
+        if (rejected + cancelled === total) {
+            return rejected > 0 ? 'rejected' : 'cancelled';
+        }
         return 'completed';
-    }
-
-    if (taken + waitingReturn === total) {
-        return 'approved';
-    }
-
-    if (rejected + cancelled === total) {
-        return rejected > 0 ? 'rejected' : 'cancelled';
     }
 
     if (taken + waitingReturn > 0 && rejected + cancelled > 0) {
         return 'partially_approved';
     }
 
-    if (returned + rejected + cancelled === total) {
-        return 'completed';
+    if (taken + waitingReturn > 0) {
+        return 'approved';
     }
 
     return 'processing';

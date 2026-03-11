@@ -6,6 +6,8 @@ function Navbar() {
   const { user, logout, isAdmin, isPeminjam } = useAuth();
   const { totalQuantity } = useCart();
   const navigate = useNavigate();
+  const displayName = user?.full_name || user?.name || 'User';
+  const email = user?.email || '-';
 
   const handleLogout = () => {
     logout();
@@ -61,9 +63,13 @@ function Navbar() {
           )}
           <li>
             <div className="navbar-user-container" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem',  }}>
-              <span className="navbar-link" style={{ color: 'var(--text-secondary)' }}>
-                {user.name}
-              </span>
+              <div className="account-chip">
+                <span className="account-name">{displayName}</span>
+                <div className="account-tooltip">
+                  <strong>{displayName}</strong>
+                  <span>{email}</span>
+                </div>
+              </div>
               <button onClick={handleLogout} className="btn btn-sm btn-danger">
                 Logout
               </button>

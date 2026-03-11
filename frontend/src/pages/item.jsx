@@ -250,12 +250,14 @@ function Items() {
               return (
                 <div className="card shop-card" key={item.id}>
                   <div className="shop-card-header">
-                    <h3>{item.item_name}</h3>
+                    <h3 className="text-clamp-1">{item.item_name}</h3>
                     <span className={`badge ${available > 0 ? 'badge-approved' : 'badge-rejected'}`}>
                       {available} available
                     </span>
                   </div>
-                  <p className="shop-card-description">{item.description || 'No description available.'}</p>
+                  <p className="shop-card-description text-clamp-2">
+                    {item.description || 'No description available.'}
+                  </p>
                   <div className="shop-card-meta">
                     <span className="shop-meta-label">Condition</span>
                     <span className={`badge ${conditionBadge}`}>{item.item_condition}</span>
