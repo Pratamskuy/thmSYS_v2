@@ -1,14 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useCart } from '../context/CartContext';
 import { itemAPI, categoryAPI } from '../services/api';
 
 function Items() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, isPeminjam } = useAuth();
+  const { addItem, items: cartItems, totalQuantity } = useCart();
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+  const [quantityById, setQuantityById] = useState({});
   const [formData, setFormData] = useState({
     item_name: '',
     description: '',
@@ -18,14 +22,26 @@ function Items() {
     item_condition: 'normal',
   });
 
+  const isShopMode = isPeminjam();
+
+  const cartLookup = useMemo(() => {
+    const map = new Map();
+    cartItems.forEach((entry) => {
+      map.set(entry.id, entry.quantity);
+    });
+    return map;
+  }, [cartItems]);
+
   useEffect(() => {
     loadItems();
-    loadCategories();
-  }, []);
+    if (!isShopMode) {
+      loadCategories();
+    }
+  }, [isShopMode]);
 
   const loadItems = async () => {
     try {
-      const res = await itemAPI.getAll();
+      const res = isShopMode ? await itemAPI.getAvailable() : await itemAPI.getAll();
       console.log('Items response:', res);
       const data = res.data || res;
       setItems(Array.isArray(data) ? data : []);
@@ -35,6 +51,55 @@ function Items() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const getDraftQty = (itemId) => {
+    const value = Number(quantityById[itemId]) || 1;
+    return value < 1 ? 1 : value;
+  };
+
+  const clampQty = (value, available) => {
+    let next = Math.max(1, Number(value) || 1);
+    if (Number.isFinite(available) && available > 0) {
+      next = Math.min(next, available);
+    }
+    return next;
+  };
+
+  const updateDraftQty = (itemId, value) => {
+    setQuantityById((prev) => ({ ...prev, [itemId]: value }));
+  };
+
+  const adjustDraftQty = (item, delta) => {
+    const available = Number(item.available) || 0;
+    const current = getDraftQty(item.id);
+    const next = clampQty(current + delta, available);
+    updateDraftQty(item.id, next);
+  };
+
+  const handleAddToCart = (item) => {
+    const available = Number(item.available) || 0;
+    const qty = clampQty(getDraftQty(item.id), available);
+
+    if (available <= 0) {
+      alert('Item is out of stock');
+      return;
+    }
+
+    if (qty > available) {
+      alert(`Maximum available stock is ${available}`);
+      return;
+    }
+
+    addItem(
+      {
+        id: item.id,
+        item_name: item.item_name,
+        available,
+      },
+      qty
+    );
+    updateDraftQty(item.id, 1);
   };
 
   const loadCategories = async () => {
@@ -149,6 +214,98 @@ function Items() {
     return (
       <div className="loading">
         <div className="spinner"></div>
+      </div>
+    );
+  }
+
+  if (isShopMode) {
+    return (
+      <div>
+        <div className="card shop-header">
+          <div className="shop-header-content">
+            <div>
+              <h1 className="card-header">Borrow Items</h1>
+              <p className="card-body">Select items and add them to your cart before borrowing.</p>
+            </div>
+            <Link to="/cart" className="btn btn-primary">
+              Go to Cart ({totalQuantity})
+            </Link>
+          </div>
+        </div>
+
+        {items.length === 0 ? (
+          <div className="card">
+            <div className="empty-state">
+              <div className="empty-state-icon">[]</div>
+              <p>No items are available right now.</p>
+            </div>
+          </div>
+        ) : (
+          <div className="shop-grid">
+            {items.map((item) => {
+              const available = Number(item.available) || 0;
+              const cartQty = cartLookup.get(item.id) || 0;
+              const conditionBadge =
+                item.item_condition === 'normal' ? 'badge-approved' : 'badge-warning';
+              return (
+                <div className="card shop-card" key={item.id}>
+                  <div className="shop-card-header">
+                    <h3>{item.item_name}</h3>
+                    <span className={`badge ${available > 0 ? 'badge-approved' : 'badge-rejected'}`}>
+                      {available} available
+                    </span>
+                  </div>
+                  <p className="shop-card-description">{item.description || 'No description available.'}</p>
+                  <div className="shop-card-meta">
+                    <span className="shop-meta-label">Condition</span>
+                    <span className={`badge ${conditionBadge}`}>{item.item_condition}</span>
+                  </div>
+                  <div className="shop-card-actions">
+                    <div className="qty-control">
+                      <button
+                        type="button"
+                        className="qty-btn"
+                        onClick={() => adjustDraftQty(item, -1)}
+                        disabled={getDraftQty(item.id) <= 1}
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        className="form-input shop-qty-input qty-input"
+                        min="1"
+                        max={available > 0 ? available : undefined}
+                        value={getDraftQty(item.id)}
+                        onChange={(e) => updateDraftQty(item.id, clampQty(e.target.value, available))}
+                      />
+                      <button
+                        type="button"
+                        className="qty-btn"
+                        onClick={() => adjustDraftQty(item, 1)}
+                        disabled={available <= 0 || getDraftQty(item.id) >= available}
+                      >
+                        +
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={available <= 0}
+                      onClick={() => handleAddToCart(item)}
+                    >
+                      Add to Cart
+                    </button>
+                  </div>
+                  {cartQty > 0 && (
+                    <p className="shop-card-cart">
+                      In cart: <strong>{cartQty}</strong>
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }

@@ -1,8 +1,10 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useCart } from '../context/CartContext';
 
 function Navbar() {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, isPeminjam } = useAuth();
+  const { totalQuantity } = useCart();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -30,6 +32,14 @@ function Navbar() {
               Items
             </Link>
           </li>
+          {isPeminjam() && (
+            <li>
+              <Link to="/cart" className="navbar-link">
+                Cart
+                <span className="cart-badge">{totalQuantity}</span>
+              </Link>
+            </li>
+          )}
           <li>
             <Link to="/borrows" className="navbar-link">
               Borrows

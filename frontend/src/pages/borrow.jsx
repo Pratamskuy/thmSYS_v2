@@ -1,32 +1,22 @@
-import { useEffect, useMemo, useState } from 'react';
-import { borrowAPI, itemAPI, returnAPI } from '../services/api';
+import { Fragment, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { borrowAPI, returnAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
-
-const INITIAL_FORM_STATE = {
-  return_date_expected: '',
-  request_notes: '',
-};
 
 function Borrows() {
   const { isAdminOrPetugas, user } = useAuth();
   const [borrows, setBorrows] = useState([]);
-  const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
-  const [reportBorrows, setReportBorrows] = useState([]);
   const [isPrintReady, setIsPrintReady] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [selectedItems, setSelectedItems] = useState([]);
-  const [activeTab, setActiveTab] = useState('create');
+  const [activeTab, setActiveTab] = useState('table');
   const [batchRequests, setBatchRequests] = useState([]);
   const [adminBatches, setAdminBatches] = useState([]);
-  const [borrowForm, setBorrowForm] = useState(INITIAL_FORM_STATE);
+  const [expandedRequests, setExpandedRequests] = useState({});
 
   useEffect(() => {
     loadBorrows();
-    loadAvailableItems();
   }, [filter]);
 
   useEffect(() => {
@@ -67,106 +57,6 @@ function Borrows() {
     }
   };
 
-  const loadAvailableItems = async () => {
-    try {
-      const res = await itemAPI.getAvailable();
-      setItems(res.data || []);
-    } catch (error) {
-      console.error('Failed to load items:', error);
-    }
-  };
-
-  const generateIdempotencyKey = () => {
-    if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
-      return globalThis.crypto.randomUUID();
-    }
-
-    return `borrow-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  };
-
-  const resetBorrowForm = () => {
-    setSelectedItems([]);
-    setBorrowForm(INITIAL_FORM_STATE);
-    setShowConfirmModal(false);
-  };
-
-  const validateBorrowBatch = () => {
-    if (selectedItems.length === 0) {
-      return 'Pick at least one item';
-    }
-
-    if (!borrowForm.return_date_expected) {
-      return 'Expected return date is required';
-    }
-
-    const hasInvalidQty = selectedItems.some((item) => {
-      const qty = Number(item.item_count);
-      return !Number.isFinite(qty) || qty < 1 || qty > Number(item.available);
-    });
-
-    if (hasInvalidQty) {
-      return 'Item quantity is invalid';
-    }
-
-    return null;
-  };
-
-  const handleReviewBatch = (e) => {
-    e.preventDefault();
-
-    const validationMessage = validateBorrowBatch();
-    if (validationMessage) {
-      alert(validationMessage);
-      return;
-    }
-
-    setShowConfirmModal(true);
-  };
-
-  const closeConfirmModal = () => {
-    if (isSubmitting) {
-      return;
-    }
-
-    setShowConfirmModal(false);
-  };
-
-  const handleConfirmSubmit = async () => {
-    const validationMessage = validateBorrowBatch();
-    if (validationMessage) {
-      alert(validationMessage);
-      return;
-    }
-
-    try {
-      setIsSubmitting(true);
-
-      const idempotencyKey = generateIdempotencyKey();
-      const payload = {
-        request_notes: borrowForm.request_notes || null,
-        items: selectedItems.map((selectedItem) => ({
-          id_items: selectedItem.id,
-          item_count: Number(selectedItem.item_count) || 1,
-          return_date_expected: borrowForm.return_date_expected,
-          notes: null,
-        })),
-      };
-
-      const response = await borrowAPI.createBatch(payload, idempotencyKey);
-      await Promise.all([loadBorrows(), loadAvailableItems()]);
-      resetBorrowForm();
-
-      const requestId = response?.data?.request_id;
-      alert(
-        response?.message ||
-          `Borrow request submitted successfully${requestId ? ` (Request #${requestId})` : ''}!`
-      );
-    } catch (error) {
-      alert(error.message);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   const handleApprove = async (id) => {
     try {
@@ -185,18 +75,6 @@ function Borrows() {
         await borrowAPI.reject(id, notes);
         loadBorrows();
         alert('Borrow request rejected!');
-      } catch (error) {
-        alert(error.message);
-      }
-    }
-  };
-
-  const handleRequestReturn = async (id) => {
-    if (window.confirm('Request to return this item?')) {
-      try {
-        await borrowAPI.requestReturn(id);
-        loadBorrows();
-        alert('Return request submitted!');
       } catch (error) {
         alert(error.message);
       }
@@ -227,15 +105,33 @@ function Borrows() {
     }
   };
 
-  const handleCancel = async (id) => {
-    if (window.confirm('Cancel this borrow request?')) {
-      try {
-        await borrowAPI.cancel(id);
-        loadBorrows();
-        alert('Borrow request cancelled!');
-      } catch (error) {
-        alert(error.message);
+  const handleConfirmReturnBatchAdmin = async (batch) => {
+    const waitingItems = (batch.items || []).filter((item) => item.borrow_status === 'waiting for return');
+    if (waitingItems.length === 0) {
+      alert('No return requests in this batch.');
+      return;
+    }
+
+    if (!window.confirm(`Confirm return for ${waitingItems.length} item(s) in batch #${batch.request_id}?`)) {
+      return;
+    }
+
+    try {
+      const results = await Promise.allSettled(
+        waitingItems.map((item) => returnAPI.confirm(item.borrow_id))
+      );
+      const successCount = results.filter((result) => result.status === 'fulfilled').length;
+      const failedCount = results.length - successCount;
+
+      await loadBorrows();
+
+      if (failedCount > 0) {
+        alert(`Confirmed ${successCount} items. ${failedCount} failed.`);
+      } else {
+        alert(`Batch #${batch.request_id} return confirmed successfully!`);
       }
+    } catch (error) {
+      alert(error.message);
     }
   };
 
@@ -251,59 +147,25 @@ function Borrows() {
     }
   };
 
+  const toggleRequestDetails = (requestId) => {
+    setExpandedRequests((prev) => ({
+      ...prev,
+      [requestId]: !prev[requestId],
+    }));
+  };
+
   const handlePrintReport = async () => {
     try {
       setIsPrintReady(false);
       setIsPrinting(true);
-      const res = await borrowAPI.getAll();
-      setReportBorrows(res.data || []);
+      const batchRes = await borrowAPI.getBatches();
+      setAdminBatches(batchRes.data || []);
       setIsPrintReady(true);
     } catch (error) {
       setIsPrinting(false);
       alert(error.message);
     }
   };
-
-  const isItemSelected = (id) => selectedItems.some((selectedItem) => selectedItem.id === id);
-
-  const toggleItemSelection = (item) => {
-    setSelectedItems((prev) => {
-      if (prev.some((selectedItem) => selectedItem.id === item.id)) {
-        return prev.filter((selectedItem) => selectedItem.id !== item.id);
-      }
-
-      return [
-        ...prev,
-        {
-          id: item.id,
-          item_name: item.item_name,
-          available: Number(item.available) || 0,
-          item_count: 1,
-        },
-      ];
-    });
-  };
-
-  const updateSelectedItem = (id, field, value) => {
-    setSelectedItems((prev) =>
-      prev.map((selectedItem) =>
-        selectedItem.id === id ? { ...selectedItem, [field]: value } : selectedItem
-      )
-    );
-  };
-
-  const updateBorrowForm = (field, value) => {
-    setBorrowForm((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const totalRequestedQuantity = useMemo(
-    () =>
-      selectedItems.reduce((acc, item) => {
-        const qty = Number(item.item_count) || 0;
-        return acc + qty;
-      }, 0),
-    [selectedItems]
-  );
 
   if (loading) {
     return (
@@ -351,8 +213,6 @@ function Borrows() {
     return `Rp ${fine.toLocaleString('id-ID')} (${late} hari)`;
   };
 
-  const today = new Date().toISOString().split('T')[0];
-
   return (
     <div>
       <div className="card no-print">
@@ -360,7 +220,7 @@ function Borrows() {
           <h1 className="card-header">
             {isAdminOrPetugas() ? 'Borrow Requests Management' : 'My Borrows'}
           </h1>
-          {!isAdminOrPetugas() && <div className="borrow-batch-badge">Batch Borrow Form</div>}
+          {!isAdminOrPetugas() && <div className="borrow-batch-badge">Cart Borrowing</div>}
         </div>
 
         {isAdminOrPetugas() && (
@@ -415,178 +275,111 @@ function Borrows() {
 
       {!isAdminOrPetugas() && (
         <div className="card no-print">
-          <div className="btn-group" style={{ margin: '1rem 0' }}>
-            <button
-              className={`btn btn-sm ${activeTab === 'create' ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setActiveTab('create')}
-              type="button"
-            >
-              Keranjang Peminjaman
-            </button>
-            <button
-              className={`btn btn-sm ${activeTab === 'history' ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setActiveTab('history')}
-              type="button"
-            >
-              Riwayat Batch Peminjaman
-            </button>
+          <div className="flex justify-between items-center mb-2">
+            <div>
+              <h2 className="card-header">Riwayat Batch Peminjaman</h2>
+              <p className="card-body">
+                Ajukan peminjaman baru melalui halaman Items dan Cart.
+              </p>
+            </div>
+            <div className="btn-group">
+              <Link to="/items" className="btn btn-secondary">
+                Browse Items
+              </Link>
+              <Link to="/cart" className="btn btn-primary">
+                Go to Cart
+              </Link>
+            </div>
           </div>
 
-          {activeTab === 'create' && (
-            <>
-              <h2 className="card-header">Create Borrow</h2>
-              <form onSubmit={handleReviewBatch}>
-            <section className="borrow-selector-panel">
-              <div className="borrow-selector-header">
-                <h3>Select Items</h3>
-                <p>Click items to include or remove them from your borrow request.</p>
-              </div>
-              <div className="item-selector-grid">
-                {items.length === 0 ? (
-                  <p className="text-center">No items are available right now.</p>
-                ) : (
-                  items.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={`item-selector-card ${isItemSelected(item.id) ? 'selected' : ''}`}
-                      onClick={() => toggleItemSelection(item)}
-                    >
-                      <span className="item-selector-name">{item.item_name}</span>
-                      <span className="item-selector-stock">Available stock: {item.available}</span>
-                    </button>
-                  ))
-                )}
-              </div>
-            </section>
-
-            {selectedItems.length === 0 ? (
-              <div className="empty-selection-hint">
-                Select at least one item to fill the borrow form.
-              </div>
-            ) : (
-              <div className="selected-items-form-list">
-                {selectedItems.map((selectedItem) => (
-                  <div className="selected-item-form-card" key={selectedItem.id}>
-                    <div className="selected-item-form-header">
-                      <h3>{selectedItem.item_name}</h3>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-danger"
-                        onClick={() => toggleItemSelection(selectedItem)}
-                      >
-                        Remove
-                      </button>
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">Quantity *</label>
-                      <input
-                        type="number"
-                        className="form-input"
-                        value={selectedItem.item_count}
-                        onChange={(e) => updateSelectedItem(selectedItem.id, 'item_count', e.target.value)}
-                        required
-                        min="1"
-                        max={selectedItem.available}
-                      />
-                      <small className="field-help">Max available: {selectedItem.available}</small>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="borrow-shared-form-grid">
-              <div className="form-group">
-                <label className="form-label">Expected Return Date *</label>
-                <input
-                  type="date"
-                  className="form-input"
-                  value={borrowForm.return_date_expected}
-                  onChange={(e) => updateBorrowForm('return_date_expected', e.target.value)}
-                  min={today}
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Batch Notes</label>
-                <textarea
-                  className="form-textarea"
-                  value={borrowForm.request_notes}
-                  onChange={(e) => updateBorrowForm('request_notes', e.target.value)}
-                  placeholder="Optional note for this batch request..."
-                />
-              </div>
+          {batchRequests.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-state-icon">[]</div>
+              <p>No batch requests found</p>
             </div>
+          ) : (
+            <div className="table-container">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Request ID</th>
+                    <th>Status</th>
+                    <th>Submitted At</th>
+                    <th>Total Items</th>
+                    <th>Taken Items</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {batchRequests.map((request) => {
+                    const items = request.items || [];
+                    const totalItems = items.length;
+                    const takenItems = items.filter((i) => i.borrow_status === 'taken').length;
+                    const isReturnAllowed = takenItems > 0;
+                    const isExpanded = Boolean(expandedRequests[request.request_id]);
 
-            <div className="btn-group">
-              <button type="submit" className="btn btn-primary" disabled={selectedItems.length === 0}>
-                Review Batch
-              </button>
-              <button type="button" className="btn btn-secondary" onClick={resetBorrowForm}>
-                Reset Form
-              </button>
-            </div>
-          </form>
-        </>
-        )}
-
-        {activeTab === 'history' && (
-          <div>
-            <h2 className="card-header">Riwayat Batch Peminjaman</h2>
-            {batchRequests.length === 0 ? (
-              <div className="empty-state">
-                <div className="empty-state-icon">[]</div>
-                <p>No batch requests found</p>
-              </div>
-            ) : (
-              <div className="table-container">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Request ID</th>
-                      <th>Status</th>
-                      <th>Submitted At</th>
-                      <th>Total Items</th>
-                      <th>Taken Items</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {batchRequests.map((request) => {
-                      const items = request.items || [];
-                      const totalItems = items.length;
-                      const takenItems = items.filter((i) => i.borrow_status === 'taken').length;
-                      const isReturnAllowed = takenItems > 0;
-
-                      return (
-                        <tr key={`batch-${request.request_id}`}>
+                    return (
+                      <Fragment key={`batch-${request.request_id}`}>
+                        <tr>
                           <td>#{request.request_id}</td>
                           <td>{request.request_status}</td>
                           <td>{new Date(request.submitted_at).toLocaleString('id-ID')}</td>
                           <td>{totalItems}</td>
                           <td>{takenItems}</td>
                           <td>
-                            <button
-                              className="btn btn-sm btn-warning"
-                              onClick={() => handleRequestReturnBatch(request.request_id)}
-                              disabled={!isReturnAllowed}
-                            >
-                              Request Return
-                            </button>
+                            <div className="btn-group">
+                              <button
+                                className="btn btn-sm btn-warning"
+                                onClick={() => handleRequestReturnBatch(request.request_id)}
+                                disabled={!isReturnAllowed}
+                              >
+                                Request Return
+                              </button>
+                              <button
+                                className="btn btn-sm btn-secondary"
+                                onClick={() => toggleRequestDetails(request.request_id)}
+                              >
+                                {isExpanded ? 'Hide Detail' : 'View Detail'}
+                              </button>
+                            </div>
                           </td>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+                        {isExpanded && (
+                          <tr className="table-row-details">
+                            <td colSpan="6">
+                              <div className="table-container">
+                                <table className="table table-compact">
+                                  <thead>
+                                    <tr>
+                                      <th>Item</th>
+                                      <th>Qty</th>
+                                      <th>Return Date</th>
+                                      <th>Status</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {items.map((item) => (
+                                      <tr key={`batch-detail-${request.request_id}-${item.borrow_id}`}>
+                                        <td>{item.item_name}</td>
+                                        <td>{item.item_count}</td>
+                                        <td>{formatDate(item.return_date_expected)}</td>
+                                        <td>{item.borrow_status}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       )}
 
       {isAdminOrPetugas() && activeTab === 'table' && (
@@ -687,10 +480,13 @@ function Borrows() {
                     const totalItems = batch.items.length;
                     const takenItems = batch.items.filter((item) => item.borrow_status === 'taken').length;
                     const pendingItems = batch.items.filter((item) => item.borrow_status === 'pending').length;
+                    const waitingReturnItems = batch.items.filter(
+                      (item) => item.borrow_status === 'waiting for return'
+                    ).length;
 
                     return (
-                      <>
-                        <tr key={`batch-${batch.request_id}`}>
+                      <Fragment key={`batch-${batch.request_id}`}>
+                        <tr>
                           <td>#{batch.request_id}</td>
                           <td>{batch.borrower}</td>
                           <td>{batch.request_status}</td>
@@ -698,20 +494,29 @@ function Borrows() {
                           <td>{totalItems}</td>
                           <td>{takenItems}</td>
                           <td>
-                            <button
-                              className="btn btn-sm btn-success"
-                              onClick={() => handleApproveBatch(batch.request_id)}
-                              disabled={pendingItems === 0}
-                            >
-                              Approve Batch
-                            </button>
+                            <div className="btn-group">
+                              <button
+                                className="btn btn-sm btn-success"
+                                onClick={() => handleApproveBatch(batch.request_id)}
+                                disabled={pendingItems === 0}
+                              >
+                                Approve Batch
+                              </button>
+                              <button
+                                className="btn btn-sm btn-primary"
+                                onClick={() => handleConfirmReturnBatchAdmin(batch)}
+                                disabled={waitingReturnItems === 0}
+                              >
+                                Confirm Return
+                              </button>
+                            </div>
                           </td>
                         </tr>
                         <tr>
                           <td colSpan="7">
                             <strong>Details:</strong>
                             <div className="table-container">
-                              <table className="table">
+                              <table className="table table-compact">
                                 <thead>
                                   <tr>
                                     <th>Item</th>
@@ -734,7 +539,7 @@ function Borrows() {
                             </div>
                           </td>
                         </tr>
-                      </>
+                      </Fragment>
                     );
                   })}
                 </tbody>
@@ -789,73 +594,6 @@ function Borrows() {
         </section>
       )}
 
-      {showConfirmModal && (
-        <div className="modal-overlay" onClick={closeConfirmModal}>
-          <div className="modal modal-confirm" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2 className="modal-title">Confirm Borrow Batch</h2>
-              <button className="modal-close" onClick={closeConfirmModal} disabled={isSubmitting}>
-                x
-              </button>
-            </div>
-
-            <div className="confirm-batch-summary">
-              <p>
-                <strong>Items selected:</strong> {selectedItems.length}
-              </p>
-              <p>
-                <strong>Total quantity:</strong> {totalRequestedQuantity}
-              </p>
-              <p>
-                <strong>Expected return:</strong> {formatDate(borrowForm.return_date_expected)}
-              </p>
-              <p>
-                <strong>Batch notes:</strong> {borrowForm.request_notes || '-'}
-              </p>
-            </div>
-
-            <div className="table-container">
-              <table className="table confirm-batch-table">
-                <thead>
-                  <tr>
-                    <th>Item</th>
-                    <th>Requested Qty</th>
-                    <th>Available</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedItems.map((selectedItem) => (
-                    <tr key={`confirm-${selectedItem.id}`}>
-                      <td>{selectedItem.item_name}</td>
-                      <td>{selectedItem.item_count}</td>
-                      <td>{selectedItem.available}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="btn-group mt-2">
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={handleConfirmSubmit}
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? 'Submitting...' : 'Confirm & Submit'}
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={closeConfirmModal}
-                disabled={isSubmitting}
-              >
-                Back
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

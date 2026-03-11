@@ -1,11 +1,13 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { CartProvider } from './context/CartContext';
 import Navbar from './components/navbar';
 import Login from './pages/login';
 import Register from './pages/register';
 import Dashboard from './pages/dashboard';
 import Items from './pages/item';
 import Borrows from './pages/borrow';
+import Cart from './pages/cart';
 import Categories from './pages/categories';
 import Users from './pages/users';
 import './index.css';
@@ -97,6 +99,14 @@ function AppRoutes() {
           }
         />
         <Route
+          path="/cart"
+          element={
+            <ProtectedRoute>
+              <Cart />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/borrows"
           element={
             <ProtectedRoute>
@@ -134,9 +144,11 @@ function AppRoutes() {
 function App() {
   return (
     <AuthProvider>
-      <div className="app-container">
-        <AppRoutes />
-      </div>
+      <CartProvider>
+        <div className="app-container">
+          <AppRoutes />
+        </div>
+      </CartProvider>
     </AuthProvider>
   );
 }

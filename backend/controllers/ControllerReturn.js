@@ -193,78 +193,88 @@ const confirmReturn = (req, res) => {
                     error: err.message
                 });
             }
+            const proceedConfirm = () => {
+                const { late, denda } = returning_item.hitungDenda(
+                    peminjaman.return_date_expected,
+                    new Date(),
+                    normalizedCondition
+                );
 
-            if (returnRows.length === 0) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Data pengembalian belum diajukan'
-                });
-            }
-
-            const { late, denda } = returning_item.hitungDenda(
-                peminjaman.return_date_expected,
-                new Date(),
-                normalizedCondition
-            );
-
-            returnModel.confirm(borrowId, officer_id, normalizedCondition, late, denda, notes, (err) => {
-                if (err) {
-                    return res.status(500).json({
-                        success: false,
-                        message: 'Gagal mengonfirmasi pengembalian',
-                        error: err.message
-                    });
-                }
-
-                item.updateJumlahTersedia(
-                    peminjaman.id_items,
-                    peminjaman.item_count,
-                    'tambah',
-                    (err) => {
-                        if (err) {
-                            return res.status(500).json({
-                                success: false,
-                                message: 'Gagal mengembalikan stok item',
-                                error: err.message
-                            });
-                        }
-
-                        borrow.processQueuedByItem(peminjaman.id_items, (queueErr) => {
-                            if (queueErr) {
-                                console.error('Gagal memproses antrean peminjaman:', queueErr);
-                            }
-
-                            borrow.updateStatus(borrowId, 'available', (err) => {
-                                if (err) {
-                                    return res.status(500).json({
-                                        success: false,
-                                        message: 'Gagal memperbarui status peminjaman',
-                                        error: err.message
-                                    });
-                                }
-
-                                activityLog.create({
-                                    id_user: officer_id,
-                                    aksi: 'CONFIRM_RETURN',
-                                    tabel_terkait: 'peminjaman',
-                                    id_data: borrowId,
-                                    keterangan: `Pengembalian dikonfirmasi: ID ${borrowId}. Denda: Rp ${denda}`
-                                }, () => { });
-
-                                return res.status(200).json({
-                                    success: true,
-                                    message: 'Pengembalian berhasil dikonfirmasi',
-                                    data: {
-                                        late,
-                                        denda,
-                                        denda_formatted: `Rp ${denda.toLocaleString('id-ID')}`
-                                    }
-                                });
-                            });
+                returnModel.confirm(borrowId, officer_id, normalizedCondition, late, denda, notes, (err) => {
+                    if (err) {
+                        return res.status(500).json({
+                            success: false,
+                            message: 'Gagal mengonfirmasi pengembalian',
+                            error: err.message
                         });
                     }
-                );
-            });
+
+                    item.updateJumlahTersedia(
+                        peminjaman.id_items,
+                        peminjaman.item_count,
+                        'tambah',
+                        (err) => {
+                            if (err) {
+                                return res.status(500).json({
+                                    success: false,
+                                    message: 'Gagal mengembalikan stok item',
+                                    error: err.message
+                                });
+                            }
+
+                            borrow.processQueuedByItem(peminjaman.id_items, (queueErr) => {
+                                if (queueErr) {
+                                    console.error('Gagal memproses antrean peminjaman:', queueErr);
+                                }
+
+                                borrow.updateStatus(borrowId, 'available', (err) => {
+                                    if (err) {
+                                        return res.status(500).json({
+                                            success: false,
+                                            message: 'Gagal memperbarui status peminjaman',
+                                            error: err.message
+                                        });
+                                    }
+
+                                    activityLog.create({
+                                        id_user: officer_id,
+                                        aksi: 'CONFIRM_RETURN',
+                                        tabel_terkait: 'peminjaman',
+                                        id_data: borrowId,
+                                        keterangan: `Pengembalian dikonfirmasi: ID ${borrowId}. Denda: Rp ${denda}`
+                                    }, () => { });
+
+                                    return res.status(200).json({
+                                        success: true,
+                                        message: 'Pengembalian berhasil dikonfirmasi',
+                                        data: {
+                                            late,
+                                            denda,
+                                            denda_formatted: `Rp ${denda.toLocaleString('id-ID')}`
+                                        }
+                                    });
+                                });
+                            });
+                        }
+                    );
+                });
+            };
+
+            if (returnRows.length === 0) {
+                returnModel.create({ borrow_id: borrowId }, (createErr) => {
+                    if (createErr && createErr.code !== 'ER_DUP_ENTRY') {
+                        return res.status(500).json({
+                            success: false,
+                            message: 'Gagal membuat data pengembalian',
+                            error: createErr.message
+                        });
+                    }
+
+                    return proceedConfirm();
+                });
+            } else {
+                proceedConfirm();
+            }
         });
     });
 };

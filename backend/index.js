@@ -5,6 +5,7 @@ require("dotenv").config();
 
 const db = require("./db");
 const routes = require("./routes/routes");
+const borrow = require("./models/pinjam");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -42,4 +43,25 @@ app.listen(PORT, () => {
     console.log(`\n========================================`);
     console.log(`Server berjalan di http://localhost:${PORT}`);
     console.log(`========================================\n`);
+
+    const intervalMinutes = Number(process.env.EXPIRE_PENDING_INTERVAL_MINUTES || 15);
+    const safeMinutes = Number.isFinite(intervalMinutes) && intervalMinutes > 0 ? intervalMinutes : 15;
+    const intervalMs = safeMinutes * 60 * 1000;
+
+    const runExpirePending = () => {
+        borrow.expirePendingBorrows((err, result) => {
+            if (err) {
+                console.error('Gagal menjalankan expire pending:', err.message);
+                return;
+            }
+
+            const expiredCount = result?.expiredCount || 0;
+            if (expiredCount > 0) {
+                console.log(`${expiredCount} peminjaman pending kedaluwarsa otomatis`);
+            }
+        });
+    };
+
+    runExpirePending();
+    setInterval(runExpirePending, intervalMs);
 });

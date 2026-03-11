@@ -584,13 +584,33 @@ const requestReturnByRequest = (requestId, userId, callback) => {
                     return done(updateErr);
                 }
 
-                syncRequestStatusOnConnection(connection, requestId, (syncErr) => {
-                    if (syncErr) {
-                        return done(syncErr);
+                const insertReturnRows = (index) => {
+                    if (index >= ids.length) {
+                        return syncRequestStatusOnConnection(connection, requestId, (syncErr) => {
+                            if (syncErr) {
+                                return done(syncErr);
+                            }
+
+                            done(null, { requestId, affectedRows: result.affectedRows });
+                        });
                     }
 
-                    done(null, { requestId, affectedRows: result.affectedRows });
-                });
+                    const borrowId = ids[index];
+                    const insertQuery = `
+                        INSERT INTO return_data (borrow_id)
+                        VALUES (?)
+                    `;
+
+                    connection.query(insertQuery, [borrowId], (insertErr) => {
+                        if (insertErr && insertErr.code !== 'ER_DUP_ENTRY') {
+                            return done(insertErr);
+                        }
+
+                        insertReturnRows(index + 1);
+                    });
+                };
+
+                insertReturnRows(0);
             });
         });
     }, callback);
